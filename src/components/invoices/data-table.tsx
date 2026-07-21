@@ -31,6 +31,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import {
   getInvoices,
@@ -49,10 +50,19 @@ export function InvoiceDataTable<TData, TValue>({
   columns,
   initialData,
 }: DataTableProps<TData, TValue>) {
+  // ----------------------------------------------------
+  // Cache Store: Maps "pageIndex_pageSize" -> TData[]
+  // ----------------------------------------------------
+  const [cache, setCache] = React.useState<
+    Record<string, { items: TData[]; hasMore: boolean }>
+  >({
+    "0_10": { items: initialData, hasMore: initialData.length === 10 },
+  });
+
   const [data, setData] = React.useState<TData[]>(initialData);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
   const [hasMore, setHasMore] = React.useState<boolean>(
-    initialData.length === 30,
+    initialData.length === 10,
   );
 
   // Pagination State
@@ -69,43 +79,72 @@ export function InvoiceDataTable<TData, TValue>({
   const [selectedType, setSelectedType] = React.useState<string>("INVOICE_C");
   const [isGenerating, setIsGenerating] = React.useState<boolean>(false);
 
-  // Summary Dialog State
+  // Dialog States
   const [summaryOpen, setSummaryOpen] = React.useState<boolean>(false);
   const [manifestData, setManifestData] = React.useState<
     GenerationManifestRow[]
   >([]);
   const [generatedInvoices, setGeneratedInvoices] = React.useState<any[]>([]);
-
-  // Export Dialog State
   const [exportOpen, setExportOpen] = React.useState<boolean>(false);
 
-  // Fetch API whenever pageIndex or pageSize changes
-  const fetchPage = React.useCallback(async (page: number, size: number) => {
-    setIsLoading(true);
-    const startOffset = page * size;
-    const res = await getInvoices(startOffset, size);
+  // ----------------------------------------------------
+  // Cached Fetch Engine
+  // ----------------------------------------------------
+  const fetchPage = React.useCallback(
+    async (page: number, size: number, forceRefresh = false) => {
+      const cacheKey = `${page}_${size}`;
 
-    setData(res.items as TData[]);
-    setHasMore(res.hasMore);
-    setIsLoading(false);
-  }, []);
+      // ⚡ CACHE HIT: Instant load from React state
+      if (!forceRefresh && cache[cacheKey]) {
+        setData(cache[cacheKey].items);
+        setHasMore(cache[cacheKey].hasMore);
+        return;
+      }
 
-  // Handle page change
+      // 🌐 CACHE MISS / REFRESH: Network Request
+      setIsLoading(true);
+      const startOffset = page * size;
+      const res = await getInvoices(startOffset, size);
+
+      const items = (res.items as TData[]) || [];
+      const fetchHasMore = res.hasMore;
+
+      // Update active state
+      setData(items);
+      setHasMore(fetchHasMore);
+
+      // Save to client-side cache memory
+      setCache((prev) => ({
+        ...prev,
+        [cacheKey]: { items, hasMore: fetchHasMore },
+      }));
+
+      setIsLoading(false);
+    },
+    [cache],
+  );
+
+  // Navigation handlers
   const handlePageChange = (newPageIndex: number) => {
     setPagination((prev) => ({ ...prev, pageIndex: newPageIndex }));
     fetchPage(newPageIndex, pageSize);
   };
 
-  // Handle page size change
   const handlePageSizeChange = (newPageSize: number) => {
     setPagination({ pageIndex: 0, pageSize: newPageSize });
     fetchPage(0, newPageSize);
   };
 
+  // Hard Refresh (Clears cache & fetches freshly)
+  const handleFreshReload = () => {
+    setCache({});
+    fetchPage(pageIndex, pageSize, true);
+  };
+
   const table = useReactTable({
     data,
     columns,
-    pageCount: -1, // Unbound page count for API pagination
+    pageCount: -1,
     manualPagination: true,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -134,6 +173,8 @@ export function InvoiceDataTable<TData, TValue>({
       setGeneratedInvoices(res.createdInvoices || []);
       setSummaryOpen(true);
       setRowSelection({});
+      // Refresh current page after invoice creation
+      handleFreshReload();
     } else {
       alert(`Error: ${res.error}`);
     }
@@ -152,6 +193,19 @@ export function InvoiceDataTable<TData, TValue>({
         </div>
 
         <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={handleFreshReload}
+            disabled={isLoading}
+            className="border-gray-300 text-gray-700 hover:bg-gray-50 font-medium px-3 h-10 gap-2"
+            title="Refresh current data from Alegra"
+          >
+            <RefreshCw
+              className={`h-4 w-4 text-gray-600 ${isLoading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+
           <Button
             variant="outline"
             onClick={() => setExportOpen(true)}
