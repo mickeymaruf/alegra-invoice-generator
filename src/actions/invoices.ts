@@ -12,13 +12,27 @@ async function getAuthHeader() {
   return `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`;
 }
 
-export async function getInvoices(startDate?: string, endDate?: string) {
+export async function getInvoices(
+  start: number = 0,
+  limit: number = 30,
+  startDate?: string,
+  endDate?: string,
+) {
   const auth = await getAuthHeader();
-  if (!auth) return [];
+  if (!auth) return { items: [], total: 0, hasMore: false };
+
+  // Alegra API strictly caps limit at 30
+  const safeLimit = Math.min(limit, 30);
 
   try {
-    let url = "https://api.alegra.com/api/v1/invoices?limit=30";
-    if (startDate && endDate) {
+    let url = `https://api.alegra.com/api/v1/invoices?start=${start}&limit=${safeLimit}`;
+
+    if (
+      startDate &&
+      endDate &&
+      startDate.trim() !== "" &&
+      endDate.trim() !== ""
+    ) {
       url += `&date_start=${startDate}&date_end=${endDate}`;
     }
 
@@ -30,10 +44,21 @@ export async function getInvoices(startDate?: string, endDate?: string) {
       cache: "no-store",
     });
 
-    if (!res.ok) return [];
-    return await res.json();
-  } catch {
-    return [];
+    if (!res.ok) {
+      console.error("Alegra API Error:", res.status, await res.text());
+      return { items: [], hasMore: false };
+    }
+
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : [];
+
+    return {
+      items,
+      hasMore: items.length === safeLimit,
+    };
+  } catch (err) {
+    console.error("Fetch Exception:", err);
+    return { items: [], hasMore: false };
   }
 }
 

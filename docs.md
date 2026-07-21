@@ -294,5 +294,3 @@ Status
 ---
 
 ## ➡️ Next Task
-
-**Phase 4 — Generation Summary**

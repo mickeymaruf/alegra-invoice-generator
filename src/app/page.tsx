@@ -7,7 +7,14 @@ import Image from "next/image";
 
 export default async function Home() {
   const credentials = await getSavedCredentials();
-  const invoices = credentials?.authenticated ? await getInvoices() : [];
+
+  // 1. Fetch initial invoices object
+  const invoicesRes = credentials?.authenticated
+    ? await getInvoices(0, 10)
+    : null;
+
+  // 2. Safely fallback to an empty array
+  const initialInvoices = invoicesRes?.items || [];
 
   return (
     <main className="min-h-screen bg-gray-100">
@@ -40,7 +47,8 @@ export default async function Home() {
 
       <div className="mx-auto max-w-7xl p-6">
         {credentials?.authenticated ? (
-          <InvoiceDataTable columns={columns} data={invoices} />
+          /* 3. Pass initialInvoices to initialData */
+          <InvoiceDataTable columns={columns} initialData={initialInvoices} />
         ) : (
           <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-yellow-700">
             Please authenticate with your Alegra account.

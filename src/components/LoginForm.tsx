@@ -22,8 +22,7 @@ export default function LoginForm({
 }: Props) {
   const [state, formAction, pending] = useActionState(login, initialState);
 
-  const [showEmail, setShowEmail] = useState(false);
-  const [showToken, setShowToken] = useState(false);
+  const [showSecret, setShowSecret] = useState(false);
 
   const [emailValue, setEmailValue] = useState(email);
   const [tokenValue, setTokenValue] = useState(token);
@@ -56,17 +55,10 @@ export default function LoginForm({
               name="email"
               value={emailValue}
               onChange={(e) => setEmailValue(e.target.value)}
-              type={showEmail ? "text" : "password"}
+              type={showSecret ? "text" : "password"}
               placeholder="Email"
               className="w-full bg-transparent px-2 text-xs outline-none text-gray-800 placeholder-gray-400"
             />
-            <button
-              type="button"
-              onClick={() => setShowEmail(!showEmail)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
-              {showEmail ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
           </div>
 
           <span className="text-gray-400 font-bold text-xs px-1">:</span>
@@ -77,16 +69,16 @@ export default function LoginForm({
               name="token"
               value={tokenValue}
               onChange={(e) => setTokenValue(e.target.value)}
-              type={showToken ? "text" : "password"}
+              type={showSecret ? "text" : "password"}
               placeholder="API Token"
               className="w-full bg-transparent px-2 text-xs outline-none text-gray-800 placeholder-gray-400"
             />
             <button
               type="button"
-              onClick={() => setShowToken(!showToken)}
+              onClick={() => setShowSecret(!showSecret)}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
             >
-              {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+              {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
 

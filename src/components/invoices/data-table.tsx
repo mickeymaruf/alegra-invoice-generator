@@ -9,6 +9,7 @@ import {
   RowSelectionState,
   getFilteredRowModel,
   ColumnFiltersState,
+  PaginationState,
 } from "@tanstack/react-table";
 
 import {
@@ -27,21 +28,40 @@ import {
   Download,
   Plus,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Loader2,
 } from "lucide-react";
-import { recreateAsTypeC, GenerationManifestRow } from "@/actions/invoices";
+import {
+  getInvoices,
+  recreateAsTypeC,
+  GenerationManifestRow,
+} from "@/actions/invoices";
 import { ExportDialog } from "@/components/invoices/export-dialog";
 import { GenerationSummaryDialog } from "./generation-summary-dialog";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
-  data: TData[];
+  initialData: TData[];
 }
 
 export function InvoiceDataTable<TData, TValue>({
   columns,
-  data,
+  initialData,
 }: DataTableProps<TData, TValue>) {
+  const [data, setData] = React.useState<TData[]>(initialData);
+  const [isLoading, setIsLoading] = React.useState<boolean>(false);
+  const [hasMore, setHasMore] = React.useState<boolean>(
+    initialData.length === 30,
+  );
+
+  // Pagination State
+  const [{ pageIndex, pageSize }, setPagination] =
+    React.useState<PaginationState>({
+      pageIndex: 0,
+      pageSize: 10,
+    });
+
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
     [],
@@ -59,9 +79,34 @@ export function InvoiceDataTable<TData, TValue>({
   // Export Dialog State
   const [exportOpen, setExportOpen] = React.useState<boolean>(false);
 
+  // Fetch API whenever pageIndex or pageSize changes
+  const fetchPage = React.useCallback(async (page: number, size: number) => {
+    setIsLoading(true);
+    const startOffset = page * size;
+    const res = await getInvoices(startOffset, size);
+
+    setData(res.items as TData[]);
+    setHasMore(res.hasMore);
+    setIsLoading(false);
+  }, []);
+
+  // Handle page change
+  const handlePageChange = (newPageIndex: number) => {
+    setPagination((prev) => ({ ...prev, pageIndex: newPageIndex }));
+    fetchPage(newPageIndex, pageSize);
+  };
+
+  // Handle page size change
+  const handlePageSizeChange = (newPageSize: number) => {
+    setPagination({ pageIndex: 0, pageSize: newPageSize });
+    fetchPage(0, newPageSize);
+  };
+
   const table = useReactTable({
     data,
     columns,
+    pageCount: -1, // Unbound page count for API pagination
+    manualPagination: true,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     onRowSelectionChange: setRowSelection,
@@ -69,6 +114,7 @@ export function InvoiceDataTable<TData, TValue>({
     state: {
       rowSelection,
       columnFilters,
+      pagination: { pageIndex, pageSize },
     },
   });
 
@@ -124,7 +170,7 @@ export function InvoiceDataTable<TData, TValue>({
       </div>
 
       {/* Main Table Card Wrapper */}
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
         {/* Search & Filter Bar */}
         <div className="flex items-center gap-4 p-4">
           <div className="relative max-w-xs w-full">
@@ -149,7 +195,7 @@ export function InvoiceDataTable<TData, TValue>({
             Filter
           </Button>
 
-          {/* Type Selector & Action Button Trigger */}
+          {/* Action Trigger Bar */}
           {selectedRows.length > 0 && (
             <div className="ml-auto flex items-center gap-3">
               <div className="flex items-center gap-2">
@@ -187,60 +233,120 @@ export function InvoiceDataTable<TData, TValue>({
         </div>
 
         {/* Data Table */}
-        <Table>
-          <TableHeader className="bg-[#F8FAFC]">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow
-                key={headerGroup.id}
-                className="border-b border-gray-200"
-              >
-                {headerGroup.headers.map((header) => (
-                  <TableHead
-                    key={header.id}
-                    className="py-3 px-4 first:border-r-0 border-r border-gray-100 last:border-r-0"
-                  >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext(),
-                        )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
+        <div className="relative">
+          {isLoading && (
+            <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex items-center justify-center z-10">
+              <Loader2 className="h-6 w-6 animate-spin text-[#2bbab4]" />
+            </div>
+          )}
 
-          <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
+          <Table>
+            <TableHeader className="bg-[#F8FAFC]">
+              {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && "selected"}
-                  className="border-b border-gray-100 hover:bg-slate-50/60 transition-colors"
+                  key={headerGroup.id}
+                  className="border-b border-gray-200"
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="py-3 px-4">
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </TableCell>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead
+                      key={header.id}
+                      className="py-3 px-4 first:border-r-0 border-r border-gray-100 last:border-r-0"
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )}
+                    </TableHead>
                   ))}
                 </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="h-32 text-center text-gray-400"
-                >
-                  No invoices found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+              ))}
+            </TableHeader>
+
+            <TableBody>
+              {table.getRowModel().rows?.length ? (
+                table.getRowModel().rows.map((row) => (
+                  <TableRow
+                    key={row.id}
+                    data-state={row.getIsSelected() && "selected"}
+                    className="border-b border-gray-100 hover:bg-slate-50/60 transition-colors"
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id} className="py-3 px-4">
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={columns.length}
+                    className="h-32 text-center text-gray-400"
+                  >
+                    No invoices found.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* Server API Pagination Bar */}
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-white">
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <span>Rows per page</span>
+            <select
+              value={pageSize}
+              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+              className="border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 text-xs focus:outline-none focus:ring-1 focus:ring-[#2bbab4]"
+            >
+              {[10, 20, 30].map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+            <span className="ml-2 text-gray-400">|</span>
+            <span className="ml-2">
+              Showing{" "}
+              <strong className="font-medium text-gray-700">
+                {data.length}
+              </strong>{" "}
+              items (API offset: {pageIndex * pageSize})
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 mr-2">
+              Page {pageIndex + 1}
+            </span>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageChange(pageIndex - 1)}
+              disabled={pageIndex === 0 || isLoading}
+              className="h-8 w-8 p-0 border-gray-300 text-gray-600 disabled:opacity-40"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageChange(pageIndex + 1)}
+              disabled={!hasMore || isLoading}
+              className="h-8 w-8 p-0 border-gray-300 text-gray-600 disabled:opacity-40"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Generation Summary Dialog */}
