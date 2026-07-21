@@ -47,11 +47,7 @@ export default async function Home() {
 
       <div className="mx-auto max-w-7xl p-6">
         {credentials?.authenticated ? (
-          /* 3. Pass initialInvoices to initialData */
-          <InvoiceDataTable
-            columns={columns}
-            initialData={invoicesRes?.items || []}
-          />
+          <InvoiceDataTable columns={columns} initialData={initialInvoices} />
         ) : (
           <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-yellow-700">
             Please authenticate with your Alegra account.

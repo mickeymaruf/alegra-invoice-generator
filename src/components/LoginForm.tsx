@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { login } from "@/actions/auth";
 
@@ -26,13 +26,9 @@ export default function LoginForm({
 
   const [emailValue, setEmailValue] = useState(email);
   const [tokenValue, setTokenValue] = useState(token);
-  const [isAuthenticated, setIsAuthenticated] = useState(authenticated);
 
-  useEffect(() => {
-    if (state.success) {
-      setIsAuthenticated(true);
-    }
-  }, [state.success]);
+  // Derive authentication state directly
+  const isAuthenticated = authenticated || state.success;
 
   return (
     <div className="flex flex-col gap-1 min-w-[500px]">

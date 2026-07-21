@@ -3,6 +3,53 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 
+// --- Type Definitions ---
+export interface NumberTemplate {
+  id: string;
+  name?: string;
+  prefix?: string;
+  subDocumentType?: string;
+}
+
+export interface InvoiceItem {
+  id: string;
+  price?: number;
+  quantity?: number;
+  discount?: number;
+  tax?: Record<string, unknown>[];
+}
+
+export interface AlegraInvoice {
+  id: string | number;
+  number?: string;
+  numberTemplate?: {
+    id?: string;
+    fullNumber?: string;
+  };
+  client?: {
+    id: string | number;
+    name?: string;
+  };
+  warehouse?: {
+    id: string | number;
+  };
+  items?: InvoiceItem[];
+  [key: string]: unknown;
+}
+
+export interface GenerationManifestRow {
+  originalInvoiceId: string;
+  originalNumber: string;
+  generatedInvoiceId: string;
+  generatedNumber: string;
+  clientId: string;
+  clientName: string;
+  status: "Success" | "Failed";
+  error: string;
+  generatedAt: string;
+}
+
+// --- Helper Functions ---
 async function getAuthHeader() {
   const cookieStore = await cookies();
   const email = cookieStore.get("alegra_email")?.value;
@@ -24,7 +71,6 @@ export async function getInvoices(
   const safeLimit = Math.min(limit, 30);
 
   try {
-    // 1. Add metadata=true to the URL
     let url = `https://api.alegra.com/api/v1/invoices?metadata=true&start=${start}&limit=${safeLimit}`;
 
     if (
@@ -51,7 +97,6 @@ export async function getInvoices(
 
     const responseData = await res.json();
 
-    // 2. Parse response with metadata format: { metadata: { total }, data: [...] }
     const items = Array.isArray(responseData.data) ? responseData.data : [];
     const total = responseData.metadata?.total || items.length;
 
@@ -65,7 +110,8 @@ export async function getInvoices(
     return { items: [], total: 0, hasMore: false };
   }
 }
-export async function getNumberTemplates() {
+
+export async function getNumberTemplates(): Promise<NumberTemplate[]> {
   const auth = await getAuthHeader();
   if (!auth) return [];
 
@@ -103,20 +149,8 @@ export async function getInvoicePdfUrl(id: string) {
   }
 }
 
-export interface GenerationManifestRow {
-  originalInvoiceId: string;
-  originalNumber: string;
-  generatedInvoiceId: string;
-  generatedNumber: string;
-  clientId: string;
-  clientName: string;
-  status: "Success" | "Failed";
-  error: string;
-  generatedAt: string;
-}
-
 export async function recreateAsTypeC(
-  invoices: any[],
+  invoices: AlegraInvoice[],
   targetTemplateId?: string,
 ) {
   const auth = await getAuthHeader();
@@ -133,7 +167,7 @@ export async function recreateAsTypeC(
     if (!templateId) {
       const templates = await getNumberTemplates();
       const typeCTemplate = templates.find(
-        (t: any) =>
+        (t: NumberTemplate) =>
           t.subDocumentType === "INVOICE_C" ||
           t.prefix?.includes("C") ||
           t.name?.toLowerCase().includes("factura c"),
@@ -151,7 +185,7 @@ export async function recreateAsTypeC(
     }
 
     const manifest: GenerationManifestRow[] = [];
-    const createdInvoices: any[] = [];
+    const createdInvoices: AlegraInvoice[] = [];
 
     for (const inv of invoices) {
       const timestamp = new Date().toISOString();
@@ -166,7 +200,7 @@ export async function recreateAsTypeC(
         },
 
         client: {
-          id: inv.client.id,
+          id: inv.client?.id,
         },
 
         warehouse: inv.warehouse
@@ -175,7 +209,7 @@ export async function recreateAsTypeC(
             }
           : undefined,
 
-        items: inv.items.map((item: any) => ({
+        items: inv.items?.map((item: InvoiceItem) => ({
           id: item.id,
           price: item.price,
           quantity: item.quantity,
@@ -230,10 +264,12 @@ export async function recreateAsTypeC(
 
     revalidatePath("/");
     return { success: true, manifest, createdInvoices };
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errorMessage =
+      err instanceof Error ? err.message : "An unexpected error occurred";
     return {
       success: false,
-      error: err.message || "An unexpected error occurred",
+      error: errorMessage,
       manifest: [],
       createdInvoices: [],
     };

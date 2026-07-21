@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 
 const ALEGRA_URL = "https://api.alegra.com/api/v1/invoices?limit=1";
 
-export async function login(_: any, formData: FormData) {
+export async function login(_: unknown, formData: FormData) {
   const email = formData.get("email") as string;
   const token = formData.get("token") as string;
 

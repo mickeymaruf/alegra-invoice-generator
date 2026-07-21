@@ -52,7 +52,7 @@ export function InvoiceDataTable<TData, TValue>({
   // ----------------------------------------------------
   // Cache Store: Maps "pageIndex_pageSize" -> { items, total, hasMore }
   // ----------------------------------------------------
-  const [cache, setCache] = React.useState<
+  const cacheRef = React.useRef<
     Record<string, { items: TData[]; total: number; hasMore: boolean }>
   >({});
 
@@ -70,6 +70,11 @@ export function InvoiceDataTable<TData, TValue>({
 
   // Direct Page Jump Input State
   const [pageInput, setPageInput] = React.useState<string>("1");
+
+  // Keep jump input string synced when pageIndex changes
+  React.useEffect(() => {
+    setPageInput(String(pageIndex + 1));
+  }, [pageIndex]);
 
   // ----------------------------------------------------
   // Global Selected Objects Registry (Preserves across pages)
@@ -95,18 +100,18 @@ export function InvoiceDataTable<TData, TValue>({
   const [exportOpen, setExportOpen] = React.useState<boolean>(false);
 
   // ----------------------------------------------------
-  // Fetch Engine with Client Cache
+  // Fetch Engine with Stable Client Cache
   // ----------------------------------------------------
   const fetchPage = React.useCallback(
     async (page: number, size: number, forceRefresh = false) => {
       const cacheKey = `${page}_${size}`;
 
-      // ⚡ CACHE HIT: Load instantly from React memory
-      if (!forceRefresh && cache[cacheKey]) {
-        setData(cache[cacheKey].items);
-        setTotalItems(cache[cacheKey].total);
-        setHasMore(cache[cacheKey].hasMore);
-        setPageInput(String(page + 1));
+      // ⚡ CACHE HIT: Load instantly from React memory ref
+      if (!forceRefresh && cacheRef.current[cacheKey]) {
+        const cached = cacheRef.current[cacheKey];
+        setData(cached.items);
+        setTotalItems(cached.total);
+        setHasMore(cached.hasMore);
         return;
       }
 
@@ -122,23 +127,19 @@ export function InvoiceDataTable<TData, TValue>({
       setData(items);
       setTotalItems(total);
       setHasMore(fetchHasMore);
-      setPageInput(String(page + 1));
 
-      // Store in memory
-      setCache((prev) => ({
-        ...prev,
-        [cacheKey]: { items, total, hasMore: fetchHasMore },
-      }));
+      // Store in memory ref
+      cacheRef.current[cacheKey] = { items, total, hasMore: fetchHasMore };
 
       setIsLoading(false);
     },
-    [cache],
+    [],
   );
 
-  // Fetch initial page data metadata on mount if needed
+  // Fetch initial page data metadata on mount
   React.useEffect(() => {
     fetchPage(0, 10);
-  }, []);
+  }, [fetchPage]);
 
   // Navigation handlers
   const handlePageChange = (newPageIndex: number) => {
@@ -153,11 +154,11 @@ export function InvoiceDataTable<TData, TValue>({
 
   // Hard Refresh (used after batch creations)
   const handleFreshReload = () => {
-    setCache({});
+    cacheRef.current = {};
     fetchPage(pageIndex, pageSize, true);
   };
 
-  // Synchronize multi-page selection state
+  // Synchronize multi-page selection state without wiping previous pages
   const handleRowSelectionChange = (
     updaterOrValue:
       | RowSelectionState
@@ -184,7 +185,7 @@ export function InvoiceDataTable<TData, TValue>({
     });
   };
 
-  // Page input keyboard submission
+  // Compute total pages accurately
   const totalPages = Math.ceil(totalItems / pageSize) || 1;
 
   const handlePageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -206,7 +207,7 @@ export function InvoiceDataTable<TData, TValue>({
   const table = useReactTable({
     data,
     columns,
-    pageCount: -1,
+    pageCount: totalPages,
     manualPagination: true,
     getRowId: (row: any) => String(row.id), // ID-based selection key across pages
     getCoreRowModel: getCoreRowModel(),
@@ -399,9 +400,9 @@ export function InvoiceDataTable<TData, TValue>({
           </Table>
         </div>
 
-        {/* Custom API Pagination Footer (Matches exact target image layout) */}
+        {/* Custom API Pagination Footer */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-white text-sm text-gray-600">
-          {/* Left: Items per page & Total Range Display (e.g., 1-10 337) */}
+          {/* Left: Items per page & Total Range Display */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <span>Ítems per page:</span>

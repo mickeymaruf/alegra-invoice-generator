@@ -47,14 +47,8 @@ function ActionMenuCell({ invoice }: { invoice: Invoice }) {
       )}
 
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-gray-600 hover:text-gray-900 focus-visible:ring-0"
-          >
-            <MoreVertical className="h-4 w-4" />
-          </Button>
+        <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none">
+          <MoreVertical className="h-4 w-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
           <DropdownMenuItem
@@ -81,8 +75,7 @@ export const columns: ColumnDef<Invoice>[] = [
     header: ({ table }) => (
       <Checkbox
         checked={
-          table.getIsAllPageRowsSelected() ||
-          (table.getIsSomePageRowsSelected() && "indeterminate")
+          table.getIsAllPageRowsSelected() || table.getIsSomePageRowsSelected()
         }
         onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
         aria-label="Select all"
