@@ -223,7 +223,52 @@ Capabilities
 * **Line-Item Expansion**: Expands multi-item invoices into individual export rows.
 
 Status
+
 * [x] Completed
+
+---
+
+### Phase 6 — Electronic Invoice Issuance & Emission Status
+
+### Goal
+
+After creating each Type C invoice as a draft, electronically issue (stamp) it so that it becomes AFIP-approved.
+
+Workflow
+
+```text
+Create Type C Invoice
+        ↓
+Collect Created Invoice IDs
+        ↓
+POST /api/v1/invoices/stamp
+(max 10 invoices per request)
+        ↓
+Emission Status Updated
+        ↓
+Approved / In Process / Rejected
+```
+
+Requirements
+
+- Batch stamp invoices using `POST /invoices/stamp`.
+- Process up to 10 invoice IDs per request.
+- Handle partial successes and failures.
+- Record stamping errors in the generation manifest.
+- Only mark generation successful after stamping succeeds.
+
+### Invoice Table Enhancements
+
+Add an **Emission Status** column to the invoice table.
+
+Display values:
+
+- Approved (`STAMPED_AND_ACCEPTED`)
+- In process (`STAMPED_AND_WAITING_RESPONSE`)
+- Rejected (`STAMPED_AND_REJECTED`)
+- To be issued (`PENDING`)
+- Not electronic (`NON_ELECTRONIC`)
+
 Status
 
 * [x] Completed
@@ -291,6 +336,16 @@ Status
 * Fixed Alegra API limit boundary (`limit=30`) for batch/paginated fetching.
 * Integrated primary CSV export trigger directly inside `GenerationSummaryDialog`.
 
+## ✅ Phase 5 Completed
+
+* Successfully implemented complete Type C invoice recreation workflow.
+* Added automatic invoice issuance (stamping) using `POST /v1/invoices/stamp` immediately after successful invoice creation.
+* Updated generation flow to only consider invoices successfully completed after they are stamped (`STAMPED_AND_ACCEPTED`).
+* Added **Emission Status** column to the invoice table.
+
 ---
 
+
+
 ## ➡️ Next Task
+

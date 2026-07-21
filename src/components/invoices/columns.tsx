@@ -4,7 +4,17 @@ import * as React from "react";
 import { ColumnDef } from "@tanstack/react-table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Invoice } from "@/app/types/invoice";
-import { MoreVertical, Coins, FileDown, Loader2 } from "lucide-react";
+import {
+  MoreVertical,
+  Coins,
+  FileDown,
+  Loader2,
+  CheckCircle2,
+  CircleEllipsis,
+  XCircle,
+  Clock,
+  CircleOff,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -212,6 +222,53 @@ export const columns: ColumnDef<Invoice>[] = [
       return (
         <div className="text-right text-sm text-gray-800 font-medium">
           {formatted}
+        </div>
+      );
+    },
+  },
+  {
+    id: "emissionStatus",
+    header: () => (
+      <span className="text-xs font-semibold text-slate-700">
+        Emission status
+      </span>
+    ),
+    cell: ({ row }) => {
+      const isElectronic = row.original.numberTemplate?.isElectronic;
+      const legalStatus = row.original.stamp?.legalStatus;
+
+      let label = "To be issued";
+      let textColor = "text-slate-600";
+      let Icon = CircleEllipsis;
+
+      if (!isElectronic) {
+        label = "Not electronic";
+        textColor = "text-slate-400";
+        Icon = CircleOff;
+      } else if (legalStatus === "STAMPED_AND_ACCEPTED") {
+        label = "Approved";
+        textColor = "text-emerald-600";
+        Icon = CheckCircle2;
+      } else if (legalStatus === "STAMPED_AND_WAITING_RESPONSE") {
+        label = "In process";
+        textColor = "text-amber-600";
+        Icon = Clock;
+      } else if (legalStatus === "STAMPED_AND_REJECTED") {
+        label = "Rejected";
+        textColor = "text-red-600";
+        Icon = XCircle;
+      } else if (legalStatus === "PENDING") {
+        label = "To be issued";
+        textColor = "text-slate-600";
+        Icon = CircleEllipsis;
+      }
+
+      return (
+        <div
+          className={`flex items-center gap-2 text-sm font-normal ${textColor}`}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          <span>{label}</span>
         </div>
       );
     },

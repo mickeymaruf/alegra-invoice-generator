@@ -154,6 +154,7 @@ export async function recreateAsTypeC(
   targetTemplateId?: string,
 ) {
   const auth = await getAuthHeader();
+
   if (!auth)
     return {
       success: false,
@@ -164,14 +165,17 @@ export async function recreateAsTypeC(
 
   try {
     let templateId = targetTemplateId;
+
     if (!templateId) {
       const templates = await getNumberTemplates();
+
       const typeCTemplate = templates.find(
         (t: NumberTemplate) =>
           t.subDocumentType === "INVOICE_C" ||
           t.prefix?.includes("C") ||
           t.name?.toLowerCase().includes("factura c"),
       );
+
       templateId = typeCTemplate?.id || templates[0]?.id;
     }
 
@@ -189,6 +193,7 @@ export async function recreateAsTypeC(
 
     for (const inv of invoices) {
       const timestamp = new Date().toISOString();
+
       const origNum =
         inv.numberTemplate?.fullNumber || inv.number || String(inv.id);
 
@@ -230,24 +235,7 @@ export async function recreateAsTypeC(
 
       const responseData = await res.json();
 
-      if (res.ok) {
-        createdInvoices.push(responseData);
-
-        manifest.push({
-          originalInvoiceId: String(inv.id),
-          originalNumber: origNum,
-          generatedInvoiceId: String(responseData.id || ""),
-          generatedNumber:
-            responseData.numberTemplate?.fullNumber ||
-            responseData.number ||
-            String(responseData.id || ""),
-          clientId: String(inv.client?.id || ""),
-          clientName: inv.client?.name || "",
-          status: "Success",
-          error: "",
-          generatedAt: timestamp,
-        });
-      } else {
+      if (!res.ok) {
         manifest.push({
           originalInvoiceId: String(inv.id),
           originalNumber: origNum,
@@ -259,17 +247,83 @@ export async function recreateAsTypeC(
           error: responseData.message || "Failed to create invoice",
           generatedAt: timestamp,
         });
+
+        continue;
       }
+
+      // Stamp / Approve invoice
+      const stampRes = await fetch(
+        "https://api.alegra.com/api/v1/invoices/stamp",
+        {
+          method: "POST",
+          headers: {
+            Authorization: auth,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ids: [String(responseData.id)],
+          }),
+        },
+      );
+
+      const stampData = await stampRes.json();
+
+      if (!stampRes.ok || stampData?.data?.[0]?.success !== true) {
+        manifest.push({
+          originalInvoiceId: String(inv.id),
+          originalNumber: origNum,
+          generatedInvoiceId: String(responseData.id),
+          generatedNumber:
+            responseData.numberTemplate?.fullNumber ||
+            responseData.number ||
+            String(responseData.id),
+          clientId: String(inv.client?.id || ""),
+          clientName: inv.client?.name || "",
+          status: "Failed",
+          error:
+            stampData?.data?.[0]?.message ||
+            stampData?.message ||
+            "Invoice created but stamping failed",
+          generatedAt: timestamp,
+        });
+
+        continue;
+      }
+
+      createdInvoices.push({
+        ...responseData,
+        emissionStatus: stampData.data[0].emissionStatus,
+      });
+
+      manifest.push({
+        originalInvoiceId: String(inv.id),
+        originalNumber: origNum,
+        generatedInvoiceId: String(responseData.id),
+        generatedNumber:
+          responseData.numberTemplate?.fullNumber ||
+          responseData.number ||
+          String(responseData.id),
+        clientId: String(inv.client?.id || ""),
+        clientName: inv.client?.name || "",
+        status: "Success",
+        error: "",
+        generatedAt: timestamp,
+      });
     }
 
     revalidatePath("/");
-    return { success: true, manifest, createdInvoices };
+
+    return {
+      success: true,
+      manifest,
+      createdInvoices,
+    };
   } catch (err: unknown) {
-    const errorMessage =
-      err instanceof Error ? err.message : "An unexpected error occurred";
     return {
       success: false,
-      error: errorMessage,
+      error:
+        err instanceof Error ? err.message : "An unexpected error occurred",
       manifest: [],
       createdInvoices: [],
     };
