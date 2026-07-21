@@ -1,21 +1,22 @@
 import LoginForm from "@/components/LoginForm";
 import { getSavedCredentials } from "@/actions/auth";
 import { getInvoices } from "@/actions/invoices";
+import { InvoiceDataTable } from "@/components/invoices/data-table";
+import { columns } from "@/components/invoices/columns";
 
 export default async function Home() {
   const credentials = await getSavedCredentials();
-
   const invoices = credentials?.authenticated ? await getInvoices() : [];
 
   return (
     <main className="min-h-screen bg-gray-100">
-      <nav className="px-6 py-2">
+      <nav className="border-b bg-white px-6 py-3 shadow-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
-          <h1 className="text-lg font-bold">
+          <h1 className="text-lg font-bold text-gray-900">
             Alegra <span className="text-blue-600">Invoice Generator</span>
           </h1>
 
-          <div className="max-w-xl w-full flex justify-end">
+          <div className="flex max-w-xl w-full justify-end">
             <LoginForm
               email={credentials?.email}
               token={credentials?.token}
@@ -27,43 +28,7 @@ export default async function Home() {
 
       <div className="mx-auto max-w-7xl p-6">
         {credentials?.authenticated ? (
-          <>
-            <div className="rounded-lg bg-white shadow border">
-              <table className="w-full">
-                <thead className="border-b bg-gray-50">
-                  <tr>
-                    <th className="p-3 text-left">Number</th>
-                    <th className="p-3 text-left">Client</th>
-                    <th className="p-3 text-left">Date</th>
-                    <th className="p-3 text-right">Total</th>
-                    <th className="p-3 text-center">Status</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {invoices.map((invoice: any) => (
-                    <tr key={invoice.id} className="border-b">
-                      <td className="p-3">{invoice.number}</td>
-
-                      <td className="p-3">{invoice.client?.name}</td>
-
-                      <td className="p-3">{invoice.date}</td>
-
-                      <td className="p-3 text-right">{invoice.total}</td>
-
-                      <td className="p-3 text-center">{invoice.status}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {invoices.length === 0 && (
-                <div className="p-8 text-center text-gray-500">
-                  No invoices found.
-                </div>
-              )}
-            </div>
-          </>
+          <InvoiceDataTable columns={columns} data={invoices} />
         ) : (
           <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-yellow-700">
             Please authenticate with your Alegra account.

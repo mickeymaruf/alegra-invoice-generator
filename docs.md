@@ -4,9 +4,9 @@
 
 This application is a lightweight internal tool that allows the client to recreate existing Alegra invoices as **Type C** invoices.
 
-Instead of importing invoices from Excel, the application connects directly to the Alegra account, fetches existing invoices, allows the user to select which invoices should be recreated, and generates new Type C invoices using the appropriate Number Template.
+Instead of importing invoices from Excel, the application connects directly to the Alegra account via API, fetches existing invoices, allows the user to select which invoices should be recreated, and generates new Type C invoices using the appropriate Number Template.
 
-The UI should closely resemble the native Alegra Sales Invoice page to minimize the learning curve for the client.
+The UI strictly replicates the native Alegra Sales Invoice page to minimize the learning curve.
 
 ---
 
@@ -18,10 +18,10 @@ The application **does not modify** existing invoices.
 
 Instead it:
 
-- Fetches existing invoices
-- Lets the user select which invoices to recreate
-- Creates new Type C invoices
-- Exports the generated invoices in the same format provided by Alegra
+* Fetches existing invoices via API
+* Lets the user select which invoices to recreate
+* Reads client/item data from selected invoices and directly generates new Type C invoices
+* Exports the generated invoices in the same format provided by Alegra
 
 ---
 
@@ -32,13 +32,11 @@ Login
     ↓
 Authenticate with Alegra
     ↓
-Fetch Sales Invoices
-    ↓
-Display Invoice Table
+Fetch Sales Invoices & Render Table with Selection
     ↓
 User Selects Invoices
     ↓
-Generate Type C Invoices
+Recreate Invoices (Direct Client Resolution & Type C Generation)
     ↓
 View Results
     ↓
@@ -57,237 +55,161 @@ Authenticate the user with Alegra.
 
 The application should require:
 
-- Username (Email)
-- API Token / Password
+* Username (Email)
+* API Token / Password
 
 After successful authentication:
 
-- Verify credentials
-- Store session securely
-- Load invoices
+* Verify credentials
+* Store session securely
+* Load invoices
 
 Status
 
-- [x] Completed
+* [x] Completed
 
 ---
 
-## Phase 2 — Fetch Sales Invoices
+## Phase 2 — Fetch Sales Invoices, Table Display & Row Selection
 
 ### Goal
 
-Retrieve invoices directly from Alegra.
-
-Display information similar to the native Alegra interface.
+Retrieve invoices directly from Alegra and display them using a Shadcn/TanStack Data Table styled identically to native Alegra UI, enabling multi-row selection.
 
 Columns
 
-- Type
-- Number
-- Client
-- Creation
-- Due Date
-- Total
-- Status
-
-Status
-
-- [ ] Not Started
-- [ ] In Progress
-- [ ] Completed
-
----
-
-## Phase 3 — Invoice List UI
-
-### Goal
-
-Create a UI that closely matches:
-
-https://app.alegra.com/invoice
+* **Select Checkbox** (Select All & Individual selection)
+* **Type** (Derived from `subDocumentType`, e.g., `INVOICE_C` $\rightarrow$ `C`)
+* **Number** (`numberTemplate.fullNumber` or `number`)
+* **Client** (`client.name`)
+* **Creation** (`date`)
+* **Expiration** (`dueDate`, with past-due red styling)
+* **Total** (`total`, formatted currency)
+* **To be charged** (`balance`, formatted currency)
+* **Status** (`open` $\rightarrow$ Pending, `draft` $\rightarrow$ Draft, `closed` $\rightarrow$ Paid, `void` $\rightarrow$ Void)
+* **Actions** (Contextual row buttons)
 
 Features
 
-- Search
-- Filters
-- Pagination
-- Checkbox selection
-- Select All
+* Client-side search filtering by Client Name
+* Full native Alegra color palette, badges, icons, and layout structure
+* Multi-row select with counter and batch action trigger
 
 Status
 
-- [ ] Not Started
-- [ ] In Progress
-- [ ] Completed
+* [x] Completed
 
 ---
 
-## Phase 4 — Selection
+## Phase 3 — Selection & Type C Generation
 
 ### Goal
 
-Allow the user to decide which invoices should be recreated.
+Allow the user to decide which invoices should be recreated. Only the selected invoices should be recreated.
 
-Selection methods
 
-- Individual selection
-- Select All
+Read data directly from selected existing invoices and immediately create corresponding **Type C** invoices.
 
-Only the selected invoices should be recreated.
-
-Status
-
-- [ ] Not Started
-- [ ] In Progress
-- [ ] Completed
-
----
-
-## Phase 5 — Client Resolution
-
-For every selected invoice
-
-```
-Read Original Invoice
-        ↓
-Find Existing Client
-        ↓
-Reuse Client ID
-```
-
-No duplicate contacts should be created.
-
-Status
-
-- [ ] Not Started
-- [ ] In Progress
-- [ ] Completed
-
----
-
-## Phase 6 — Generate Type C Invoices
+Since data is pulled directly from the live Alegra API, client and item IDs are guaranteed to exist, eliminating redundant existence checks.
 
 Workflow
 
 ```
-Original Invoice
+Selected Original Invoice
         ↓
-Copy Invoice Data
+Extract Client ID, Items, Prices, Taxes & Dates
         ↓
-Use Type C Number Template
+Apply Type C Number Template
         ↓
-Create New Invoice
+POST New Invoice to Alegra API
+
 ```
 
 Requirements
 
-- Same Client
-- Same Products
-- Same Prices
-- Same Taxes
-- Same Dates (where applicable)
-- Type C Number Template
+* Reuse existing Client ID (zero duplicate contacts)
+* Retain original Items, Quantities, Unit Prices, and Taxes
+* Retain relevant dates
+* Apply Type C Number Template
 
 Status
 
-- [ ] Not Started
-- [ ] In Progress
-- [ ] Completed
+* [ ] Not Started
+* [ ] In Progress
+* [ ] Completed
 
 ---
 
-## Phase 7 — Results
+## Phase 4 — Results
 
-Display
+Display execution summary:
 
-- Original Invoice
-- New Invoice
-- Client
-- Status
-- Errors
+* Original Invoice vs. New Type C Invoice mapping
+* Status badge (Success / Error)
+* Error logs if creation fails for specific items
 
 Status
 
-- [ ] Not Started
-- [ ] In Progress
-- [ ] Completed
+* [ ] Not Started
+* [ ] In Progress
+* [ ] Completed
 
 ---
 
-## Phase 8 — Export
+## Phase 5 — Export
 
-Allow exporting the generated invoices.
-
-Target
-
-Replicate Alegra's native Export functionality as closely as possible.
-
-Possible formats
-
-- Excel (.xlsx)
-- CSV (if supported)
-
-The exported file should include the newly generated Type C invoices.
+Export generated invoices, matching Alegra's native export layout where possible (`.xlsx` or `.csv`).
 
 Status
 
-- [ ] Not Started
-- [ ] In Progress
-- [ ] Completed
-
----
-
-# Future Improvements
-
-- Retry failed invoice generation
-- Bulk PDF download (ZIP)
-- Download individual PDFs
-- Invoice comparison (Original vs Type C)
-- Background processing for large batches
-- Audit logs
+* [ ] Not Started
+* [ ] In Progress
+* [ ] Completed
 
 ---
 
 # Progress Tracker
 
-| Feature | Status |
-|----------|--------|
-| Authentication | ✅ |
-| Fetch Invoices | ⬜ |
-| Invoice Table UI | ⬜ |
-| Invoice Selection | ⬜ |
-| Client Resolution | ⬜ |
-| Generate Type C | ⬜ |
-| Results Screen | ⬜ |
-| Export | ⬜ |
+| Feature Phase | Status |
+| --- | --- |
+| Phase 1: Authentication | ✅ |
+| Phase 2: Fetch Sales Invoices, Table Display & Row Selection | ✅ |
+| Phase 3: Selection & Type C Generation | ⬜ |
+| Phase 4: Results Screen | ⬜ |
+| Phase 5: Export | ⬜ |
 
 ---
 
 # Development Rules
 
-- Complete one phase before starting the next.
-- Test every feature before marking it complete.
-- Do not duplicate clients.
-- Preserve original invoice data.
-- Never modify existing invoices.
-- Always create new Type C invoices.
-- Use reusable components.
-- Handle API errors gracefully.
-- Keep the UI visually close to Alegra's invoice page.
+* Complete one consolidated phase before starting the next.
+* Test every feature before marking it complete.
+* Do not duplicate clients (reuse existing Client IDs fetched directly from API).
+* Preserve original invoice data.
+* **Never modify or delete existing invoices.**
+* Always create new Type C invoices.
+* Handle API errors gracefully.
+* Keep the UI visually identical to Alegra's invoice page.
 
-# Development Progress
+---
+
+# Development Progress Log
 
 ## ✅ Phase 1 Completed
 
-Implemented:
+* Server Actions authentication
+* HTTP-only cookie session
+* Auto login & re-authentication logic
 
-- Server Actions authentication
-- HTTP-only cookie session
-- Auto login after refresh
-- Re-authentication flow
-- Credential persistence
-- Automatic session validation
+## ✅ Phase 2 Completed
 
-Next:
+* Connected to `GET /v1/invoices` endpoint
+* Shadcn/TanStack Data Table with exact Alegra branding & styling
+* Accurate column mappings (`subDocumentType`, `balance`, `status` normalization)
+* Search filter & multi-select state engine
 
-➡️ Phase 2 — Fetch Sales Invoices
+---
+
+## ➡️ Next Task
+
+**Phase 3 — Selection & Type C Generation (Combined)**
