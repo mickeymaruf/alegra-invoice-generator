@@ -44,7 +44,7 @@ export default function LoginForm({
 
       <form action={formAction} className="flex flex-col gap-1">
         {/* Main horizontal bar container */}
-        <div className="flex items-center rounded-md border border-gray-300 bg-white p-1 shadow-sm focus-within:ring-1 focus-within:ring-gray-400">
+        <div className="flex items-center rounded-lg border border-gray-300 bg-white p-1 focus-within:ring-1 focus-within:ring-gray-400">
           {/* Basic label prefix section */}
           <div className="border-r border-gray-200 px-3 py-1 text-xs font-medium text-gray-600">
             Basic
@@ -93,9 +93,9 @@ export default function LoginForm({
           {/* Authenticate Action Button */}
           <button
             disabled={pending}
-            className={`ml-2 rounded px-3 py-1.5 text-xs font-medium text-white transition whitespace-nowrap disabled:opacity-50 ${
+            className={`ml-2 rounded-md px-3 py-1.5 text-xs font-medium text-white transition whitespace-nowrap disabled:opacity-50 ${
               isAuthenticated
-                ? "bg-green-600 hover:bg-green-700"
+                ? "bg-[#2bbab4] hover:bg-[#239c96]"
                 : "bg-blue-600 hover:bg-blue-700"
             }`}
           >

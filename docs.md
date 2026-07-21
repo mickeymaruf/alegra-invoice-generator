@@ -208,21 +208,25 @@ Notes
 
 Status
 
-* [ ] Not Started
-* [ ] In Progress
-* [ ] Completed
+* [x] Completed
 
 ---
 
 ## Phase 5 — Export
 
-Export generated invoices, matching Alegra's native export layout where possible (`.xlsx` or `.csv`).
+Export generated invoices matching Alegra's native 32-column `.csv` format (`sep=;` header).
+
+Capabilities
+* **Export Selected**: Export checked rows from the data table.
+* **Date Range Export**: Fetch and export invoices by start and end dates directly from Alegra.
+* **Post-Generation Export**: Instant export of newly created Type C invoices from the summary modal.
+* **Line-Item Expansion**: Expands multi-item invoices into individual export rows.
 
 Status
+* [x] Completed
+Status
 
-* [ ] Not Started
-* [ ] In Progress
-* [ ] Completed
+* [x] Completed
 
 ---
 
@@ -233,8 +237,8 @@ Status
 | Phase 1: Authentication | ✅ |
 | Phase 2: Fetch Sales Invoices, Table Display & Row Selection | ✅ |
 | Phase 3: Selection & Type C Generation | ✅ |
-| Phase 4: Results Screen | ⬜ |
-| Phase 5: Export | ⬜ |
+| Phase 4: Results Screen | ✅ |
+| Phase 5: Export | ✅ |
 
 ---
 
@@ -272,6 +276,20 @@ Status
 * Preserved client IDs, item references, quantities, prices, taxes, and dates
 * Added target document type selector in the table action bar
 * Added "Download PDF" action in the row dropdown menu
+
+## ✅ Phase 4 Completed
+
+* Implemented `GenerationSummaryDialog` modal triggered immediately post-generation.
+* Generated machine-readable CSV manifest (`originalInvoiceId`, `generatedInvoiceId`, timestamps, status, and errors).
+* Configured primary CTA to directly download the native Alegra CSV export of newly created Type C invoices.
+
+## ✅ Phase 5 Completed
+
+* Created `mapInvoiceToAlegraExportRow` utility mapping function in `src/lib/export-utils.ts`.
+* Implemented native 32-column Alegra CSV exporter with line-item expansion and `sep=;` separator header.
+* Implemented flexible export modes inside `ExportDialog`: export currently selected rows OR fetch by Start/End Date Range.
+* Fixed Alegra API limit boundary (`limit=30`) for batch/paginated fetching.
+* Integrated primary CSV export trigger directly inside `GenerationSummaryDialog`.
 
 ---
 

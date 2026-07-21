@@ -29,7 +29,9 @@ import {
   ChevronDown,
   Loader2,
 } from "lucide-react";
-import { recreateAsTypeC } from "@/actions/invoices";
+import { recreateAsTypeC, GenerationManifestRow } from "@/actions/invoices";
+import { ExportDialog } from "@/components/invoices/export-dialog";
+import { GenerationSummaryDialog } from "./generation-summary-dialog";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -46,6 +48,16 @@ export function InvoiceDataTable<TData, TValue>({
   );
   const [selectedType, setSelectedType] = React.useState<string>("INVOICE_C");
   const [isGenerating, setIsGenerating] = React.useState<boolean>(false);
+
+  // Summary Dialog State
+  const [summaryOpen, setSummaryOpen] = React.useState<boolean>(false);
+  const [manifestData, setManifestData] = React.useState<
+    GenerationManifestRow[]
+  >([]);
+  const [generatedInvoices, setGeneratedInvoices] = React.useState<any[]>([]);
+
+  // Export Dialog State
+  const [exportOpen, setExportOpen] = React.useState<boolean>(false);
 
   const table = useReactTable({
     data,
@@ -71,8 +83,10 @@ export function InvoiceDataTable<TData, TValue>({
     const res = await recreateAsTypeC(selectedInvoices);
     setIsGenerating(false);
 
-    if (res.success) {
-      alert(`Successfully generated ${selectedRows.length} invoice(s)!`);
+    if (res.success && res.manifest) {
+      setManifestData(res.manifest);
+      setGeneratedInvoices(res.createdInvoices || []);
+      setSummaryOpen(true);
       setRowSelection({});
     } else {
       alert(`Error: ${res.error}`);
@@ -94,6 +108,7 @@ export function InvoiceDataTable<TData, TValue>({
         <div className="flex items-center gap-3">
           <Button
             variant="outline"
+            onClick={() => setExportOpen(true)}
             className="border-gray-300 text-gray-700 hover:bg-gray-50 font-medium px-4 h-10 gap-2"
           >
             <Download className="h-4 w-4 text-gray-600" />
@@ -109,7 +124,7 @@ export function InvoiceDataTable<TData, TValue>({
       </div>
 
       {/* Main Table Card Wrapper */}
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
         {/* Search & Filter Bar */}
         <div className="flex items-center gap-4 p-4">
           <div className="relative max-w-xs w-full">
@@ -137,7 +152,6 @@ export function InvoiceDataTable<TData, TValue>({
           {/* Type Selector & Action Button Trigger */}
           {selectedRows.length > 0 && (
             <div className="ml-auto flex items-center gap-3">
-              {/* Type Selection Dropdown */}
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500 font-medium">
                   Target Type:
@@ -166,7 +180,7 @@ export function InvoiceDataTable<TData, TValue>({
                 {isGenerating && (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 )}
-                Recreate as {selectedType === "INVOICE_C" ? "Type C" : "Type C"}
+                Recreate as Type C
               </Button>
             </div>
           )}
@@ -228,6 +242,21 @@ export function InvoiceDataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
+
+      {/* Generation Summary Dialog */}
+      <GenerationSummaryDialog
+        open={summaryOpen}
+        onClose={() => setSummaryOpen(false)}
+        manifest={manifestData}
+        generatedInvoices={generatedInvoices}
+      />
+
+      {/* Export Dialog */}
+      <ExportDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        selectedInvoices={selectedRows.map((r) => r.original)}
+      />
     </div>
   );
 }

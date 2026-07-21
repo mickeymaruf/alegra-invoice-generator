@@ -12,12 +12,17 @@ async function getAuthHeader() {
   return `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`;
 }
 
-export async function getInvoices() {
+export async function getInvoices(startDate?: string, endDate?: string) {
   const auth = await getAuthHeader();
   if (!auth) return [];
 
   try {
-    const res = await fetch("https://api.alegra.com/api/v1/invoices?limit=30", {
+    let url = "https://api.alegra.com/api/v1/invoices?limit=30";
+    if (startDate && endDate) {
+      url += `&date_start=${startDate}&date_end=${endDate}`;
+    }
+
+    const res = await fetch(url, {
       headers: {
         Authorization: auth,
         Accept: "application/json",
@@ -32,7 +37,6 @@ export async function getInvoices() {
   }
 }
 
-// Fetch available Number Templates from Alegra
 export async function getNumberTemplates() {
   const auth = await getAuthHeader();
   if (!auth) return [];
@@ -50,16 +54,53 @@ export async function getNumberTemplates() {
   }
 }
 
-// Batch Recreate Selected Invoices as Type C
+export async function getInvoicePdfUrl(id: string) {
+  const auth = await getAuthHeader();
+  if (!auth) return null;
+
+  try {
+    const res = await fetch(
+      `https://api.alegra.com/api/v1/invoices/${id}?fields=pdf`,
+      {
+        headers: { Authorization: auth, Accept: "application/json" },
+        cache: "no-store",
+      },
+    );
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.pdfUrl || data.pdf?.url || data.pdf || null;
+  } catch {
+    return null;
+  }
+}
+
+export interface GenerationManifestRow {
+  originalInvoiceId: string;
+  originalNumber: string;
+  generatedInvoiceId: string;
+  generatedNumber: string;
+  clientId: string;
+  clientName: string;
+  status: "Success" | "Failed";
+  error: string;
+  generatedAt: string;
+}
+
 export async function recreateAsTypeC(
   invoices: any[],
   targetTemplateId?: string,
 ) {
   const auth = await getAuthHeader();
-  if (!auth) return { success: false, error: "Not authenticated" };
+  if (!auth)
+    return {
+      success: false,
+      error: "Not authenticated",
+      manifest: [],
+      createdInvoices: [],
+    };
 
   try {
-    // 1. Fetch available templates if targetTemplateId is not explicitly provided
     let templateId = targetTemplateId;
     if (!templateId) {
       const templates = await getNumberTemplates();
@@ -76,14 +117,19 @@ export async function recreateAsTypeC(
       return {
         success: false,
         error: "No valid Type C template found in Alegra.",
+        manifest: [],
+        createdInvoices: [],
       };
     }
 
-    const results = [];
+    const manifest: GenerationManifestRow[] = [];
+    const createdInvoices: any[] = [];
 
-    // 2. Loop through selected invoices and create new Type C invoices
     for (const inv of invoices) {
-      // Direct reuse of existing client and line item attributes
+      const timestamp = new Date().toISOString();
+      const origNum =
+        inv.numberTemplate?.fullNumber || inv.number || String(inv.id);
+
       const payload = {
         date: inv.date,
         dueDate: inv.dueDate || inv.date,
@@ -114,51 +160,45 @@ export async function recreateAsTypeC(
       const responseData = await res.json();
 
       if (res.ok) {
-        results.push({
-          originalId: inv.id,
-          newInvoice: responseData,
-          success: true,
+        createdInvoices.push(responseData);
+
+        manifest.push({
+          originalInvoiceId: String(inv.id),
+          originalNumber: origNum,
+          generatedInvoiceId: String(responseData.id || ""),
+          generatedNumber:
+            responseData.numberTemplate?.fullNumber ||
+            responseData.number ||
+            String(responseData.id || ""),
+          clientId: String(inv.client?.id || ""),
+          clientName: inv.client?.name || "",
+          status: "Success",
+          error: "",
+          generatedAt: timestamp,
         });
       } else {
-        results.push({
-          originalId: inv.id,
-          success: false,
+        manifest.push({
+          originalInvoiceId: String(inv.id),
+          originalNumber: origNum,
+          generatedInvoiceId: "",
+          generatedNumber: "",
+          clientId: String(inv.client?.id || ""),
+          clientName: inv.client?.name || "",
+          status: "Failed",
           error: responseData.message || "Failed to create invoice",
+          generatedAt: timestamp,
         });
       }
     }
 
     revalidatePath("/");
-    return { success: true, results };
+    return { success: true, manifest, createdInvoices };
   } catch (err: any) {
     return {
       success: false,
       error: err.message || "An unexpected error occurred",
+      manifest: [],
+      createdInvoices: [],
     };
-  }
-}
-
-// Fetch PDF download URL for a specific invoice
-export async function getInvoicePdfUrl(id: string) {
-  const auth = await getAuthHeader();
-  if (!auth) return null;
-
-  try {
-    const res = await fetch(
-      `https://api.alegra.com/api/v1/invoices/${id}?fields=pdf`,
-      {
-        headers: {
-          Authorization: auth,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      },
-    );
-
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.pdfUrl || data.pdf?.url || data.pdf || null;
-  } catch {
-    return null;
   }
 }

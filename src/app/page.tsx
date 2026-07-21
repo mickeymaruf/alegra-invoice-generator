@@ -3,6 +3,7 @@ import { getSavedCredentials } from "@/actions/auth";
 import { getInvoices } from "@/actions/invoices";
 import { InvoiceDataTable } from "@/components/invoices/data-table";
 import { columns } from "@/components/invoices/columns";
+import Image from "next/image";
 
 export default async function Home() {
   const credentials = await getSavedCredentials();
@@ -10,11 +11,22 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-gray-100">
-      <nav className="border-b bg-white px-6 py-3 shadow-sm">
+      <nav className="border-b bg-white px-6 py-3">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
-          <h1 className="text-lg font-bold text-gray-900">
-            Alegra <span className="text-blue-600">Invoice Generator</span>
-          </h1>
+          <div className="flex items-center gap-1">
+            <Image
+              src="/alegra-logo.svg"
+              alt="Alegra Logo"
+              width={110}
+              height={32}
+              priority
+              className="h-8 w-auto object-contain"
+            />
+
+            <h1 className="text-lg font-semibold tracking-wide text-[#2bbab4]">
+              Invoice Generator
+            </h1>
+          </div>
 
           <div className="flex max-w-xl w-full justify-end">
             <LoginForm
