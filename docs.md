@@ -131,22 +131,80 @@ Requirements
 * Retain original Items, Quantities, Unit Prices, and Taxes
 * Retain relevant dates
 * Apply Type C Number Template
+* PDF download option available per invoice
 
 Status
 
-* [ ] Not Started
-* [ ] In Progress
-* [ ] Completed
+* [x] Completed
 
 ---
 
-## Phase 4 — Results
+## Phase 4 — Generation Summary
 
-Display execution summary:
+### Goal
 
-* Original Invoice vs. New Type C Invoice mapping
-* Status badge (Success / Error)
-* Error logs if creation fails for specific items
+Display a concise summary immediately after the Type C invoice generation process completes.
+
+The summary only represents the current generation job.
+
+Display
+
+```text
+✅ Generation Complete
+
+Successfully created 17 Type C invoices.
+
+Failed: 0
+
+[ Export XLSX ]
+[ Download Generation Manifest ]
+[ Close ]
+```
+
+### Generation Manifest
+
+Alongside the generated invoices, the application creates a machine-readable CSV manifest containing the relationship between every original invoice and its corresponding generated Type C invoice.
+
+The manifest is intended for future automation tasks and serves as a portable mapping file.
+
+Columns
+
+* Original Invoice ID
+* Original Invoice Number
+* Generated Invoice ID
+* Generated Invoice Number
+* Client ID
+* Client Name
+* Generation Status (Success / Failed)
+* Error Message (if failed)
+* Generated At (Timestamp)
+
+Example
+
+```csv
+originalInvoiceId,originalNumber,generatedInvoiceId,generatedNumber,clientId,clientName,status,error,generatedAt
+12345,B-001,98765,C-001,456,John Doe,Success,,2026-07-21T10:35:12Z
+12346,B-002,98766,C-002,457,Jane Smith,Success,,2026-07-21T10:35:14Z
+12347,B-003,,,,,Failed,"Tax condition missing",2026-07-21T10:35:15Z
+```
+
+### Purpose
+
+The Generation Manifest enables future automation without requiring a database.
+
+Examples include:
+
+* Bulk deletion of generated Type C invoices.
+* Bulk regeneration after fixing failed invoices.
+* Auditing original-to-generated invoice relationships.
+* Running custom scripts against previously generated invoices.
+* Importing the manifest into other internal tools.
+
+Notes
+
+* The manifest is generated for the current execution only.
+* The application does not maintain generation history.
+* Users should download and retain the manifest if future automation is required.
 
 Status
 
@@ -174,7 +232,7 @@ Status
 | --- | --- |
 | Phase 1: Authentication | ✅ |
 | Phase 2: Fetch Sales Invoices, Table Display & Row Selection | ✅ |
-| Phase 3: Selection & Type C Generation | ⬜ |
+| Phase 3: Selection & Type C Generation | ✅ |
 | Phase 4: Results Screen | ⬜ |
 | Phase 5: Export | ⬜ |
 
@@ -208,8 +266,15 @@ Status
 * Accurate column mappings (`subDocumentType`, `balance`, `status` normalization)
 * Search filter & multi-select state engine
 
+## ✅ Phase 3 Completed
+
+* Implemented `recreateAsTypeC` server action for batch generation
+* Preserved client IDs, item references, quantities, prices, taxes, and dates
+* Added target document type selector in the table action bar
+* Added "Download PDF" action in the row dropdown menu
+
 ---
 
 ## ➡️ Next Task
 
-**Phase 3 — Selection & Type C Generation (Combined)**
+**Phase 4 — Generation Summary**

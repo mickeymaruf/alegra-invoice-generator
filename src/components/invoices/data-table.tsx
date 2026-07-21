@@ -1,4 +1,3 @@
-// components/invoices/data-table.tsx
 "use client";
 
 import * as React from "react";
@@ -22,7 +21,15 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Filter, Download, Plus, ChevronDown } from "lucide-react";
+import {
+  Search,
+  Filter,
+  Download,
+  Plus,
+  ChevronDown,
+  Loader2,
+} from "lucide-react";
+import { recreateAsTypeC } from "@/actions/invoices";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -37,6 +44,8 @@ export function InvoiceDataTable<TData, TValue>({
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
     [],
   );
+  const [selectedType, setSelectedType] = React.useState<string>("INVOICE_C");
+  const [isGenerating, setIsGenerating] = React.useState<boolean>(false);
 
   const table = useReactTable({
     data,
@@ -53,6 +62,23 @@ export function InvoiceDataTable<TData, TValue>({
 
   const selectedRows = table.getFilteredSelectedRowModel().rows;
 
+  const handleRecreate = async () => {
+    if (selectedRows.length === 0) return;
+
+    setIsGenerating(true);
+    const selectedInvoices = selectedRows.map((r) => r.original);
+
+    const res = await recreateAsTypeC(selectedInvoices);
+    setIsGenerating(false);
+
+    if (res.success) {
+      alert(`Successfully generated ${selectedRows.length} invoice(s)!`);
+      setRowSelection({});
+    } else {
+      alert(`Error: ${res.error}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header Section */}
@@ -61,10 +87,7 @@ export function InvoiceDataTable<TData, TValue>({
           <h1 className="text-2xl font-bold text-gray-900">Sales invoices</h1>
           <p className="mt-1 text-sm text-gray-500">
             Create, edit, and manage detailed invoices for your business
-            transactions.{" "}
-            <a href="#" className="text-[#2bbab4] hover:underline font-medium">
-              Watch more.
-            </a>
+            transactions.
           </p>
         </div>
 
@@ -111,21 +134,39 @@ export function InvoiceDataTable<TData, TValue>({
             Filter
           </Button>
 
-          {/* Action trigger when rows are selected for Phase 4 & 6 */}
+          {/* Type Selector & Action Button Trigger */}
           {selectedRows.length > 0 && (
             <div className="ml-auto flex items-center gap-3">
+              {/* Type Selection Dropdown */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 font-medium">
+                  Target Type:
+                </span>
+                <select
+                  value={selectedType}
+                  onChange={(e) => setSelectedType(e.target.value)}
+                  className="text-xs border border-gray-300 rounded-md p-1.5 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#2bbab4]"
+                >
+                  <option value="INVOICE_C">Type C Invoice</option>
+                </select>
+              </div>
+
+              <span className="text-xs text-gray-400">|</span>
+
               <span className="text-xs text-gray-500">
                 {selectedRows.length} selected
               </span>
+
               <Button
                 size="sm"
-                className="bg-[#2bbab4] hover:bg-[#24a39e] text-white"
-                onClick={() => {
-                  const selectedInvoices = selectedRows.map((r) => r.original);
-                  console.log("Recreating Invoices:", selectedInvoices);
-                }}
+                disabled={isGenerating}
+                className="bg-[#2bbab4] hover:bg-[#24a39e] text-white gap-2"
+                onClick={handleRecreate}
               >
-                Recreate {selectedRows.length} as Type C
+                {isGenerating && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                )}
+                Recreate as {selectedType === "INVOICE_C" ? "Type C" : "Type C"}
               </Button>
             </div>
           )}

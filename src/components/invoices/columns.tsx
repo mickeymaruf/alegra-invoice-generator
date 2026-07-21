@@ -1,10 +1,79 @@
 "use client";
 
+import * as React from "react";
 import { ColumnDef } from "@tanstack/react-table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Invoice } from "@/app/types/invoice";
-import { MoreVertical, Coins } from "lucide-react";
+import { MoreVertical, Coins, FileDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { getInvoicePdfUrl } from "@/actions/invoices";
+
+function ActionMenuCell({ invoice }: { invoice: Invoice }) {
+  const [isDownloading, setIsDownloading] = React.useState(false);
+  const isPending = invoice.status?.toLowerCase() === "open";
+
+  const handleDownloadPdf = async () => {
+    setIsDownloading(true);
+    try {
+      const pdfUrl = await getInvoicePdfUrl(String(invoice.id));
+      if (pdfUrl) {
+        window.open(pdfUrl, "_blank");
+      } else {
+        alert("Could not retrieve the PDF for this invoice.");
+      }
+    } catch {
+      alert("An error occurred while fetching the PDF.");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      {isPending && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-gray-600 hover:text-gray-900"
+        >
+          <Coins className="h-4 w-4" />
+        </Button>
+      )}
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-gray-600 hover:text-gray-900 focus-visible:ring-0"
+          >
+            <MoreVertical className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem
+            onClick={handleDownloadPdf}
+            disabled={isDownloading}
+            className="cursor-pointer gap-2 text-sm text-gray-700"
+          >
+            {isDownloading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-[#2bbab4]" />
+            ) : (
+              <FileDown className="h-4 w-4 text-gray-500" />
+            )}
+            Download PDF
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
 
 export const columns: ColumnDef<Invoice>[] = [
   {
@@ -38,8 +107,6 @@ export const columns: ColumnDef<Invoice>[] = [
     ),
     cell: ({ row }) => {
       const subType = row.original.numberTemplate?.subDocumentType;
-
-      // Extract "C" from "INVOICE_C", or fallback to raw subType / "C"
       const typeDisplay = subType ? subType.replace("INVOICE_", "") : "C";
 
       return (
@@ -91,7 +158,6 @@ export const columns: ColumnDef<Invoice>[] = [
       const dueDateStr = row.original.dueDate || row.original.date;
       const status = row.original.status?.toLowerCase();
 
-      // Check if due date is in the past and invoice is still open
       const isPastDue =
         dueDateStr && new Date(dueDateStr) < new Date() && status === "open";
 
@@ -129,7 +195,7 @@ export const columns: ColumnDef<Invoice>[] = [
     },
   },
   {
-    accessorKey: "balance", // Correct field name from Alegra API
+    accessorKey: "balance",
     header: () => (
       <div className="text-right text-xs font-semibold text-gray-600">
         To be charged
@@ -168,13 +234,12 @@ export const columns: ColumnDef<Invoice>[] = [
       const statusRaw =
         (row.getValue("status") as string)?.toLowerCase() || "draft";
 
-      // Map Alegra status values to display labels
       let label = "Draft";
-      let badgeStyle = "bg-[#EEF2FF] text-[#4F46E5]"; // Draft / default soft blue
+      let badgeStyle = "bg-[#EEF2FF] text-[#4F46E5]";
 
       if (statusRaw === "open") {
         label = "Pending";
-        badgeStyle = "bg-[#FEF3C7] text-[#B45309]"; // Soft yellow badge
+        badgeStyle = "bg-[#FEF3C7] text-[#B45309]";
       } else if (statusRaw === "closed") {
         label = "Paid";
         badgeStyle = "bg-emerald-50 text-emerald-700";
@@ -197,29 +262,6 @@ export const columns: ColumnDef<Invoice>[] = [
   {
     id: "actions",
     header: () => null,
-    cell: ({ row }) => {
-      const isPending = row.original.status?.toLowerCase() === "open";
-
-      return (
-        <div className="flex items-center justify-end gap-1">
-          {isPending && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-600 hover:text-gray-900"
-            >
-              <Coins className="h-4 w-4" />
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-gray-600 hover:text-gray-900"
-          >
-            <MoreVertical className="h-4 w-4" />
-          </Button>
-        </div>
-      );
-    },
+    cell: ({ row }) => <ActionMenuCell invoice={row.original} />,
   },
 ];
