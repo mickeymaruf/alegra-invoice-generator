@@ -31,7 +31,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
-  RefreshCw,
 } from "lucide-react";
 import {
   getInvoices,
@@ -51,19 +50,16 @@ export function InvoiceDataTable<TData, TValue>({
   initialData,
 }: DataTableProps<TData, TValue>) {
   // ----------------------------------------------------
-  // Cache Store: Maps "pageIndex_pageSize" -> TData[]
+  // Cache Store: Maps "pageIndex_pageSize" -> { items, total, hasMore }
   // ----------------------------------------------------
   const [cache, setCache] = React.useState<
-    Record<string, { items: TData[]; hasMore: boolean }>
-  >({
-    "0_10": { items: initialData, hasMore: initialData.length === 10 },
-  });
+    Record<string, { items: TData[]; total: number; hasMore: boolean }>
+  >({});
 
   const [data, setData] = React.useState<TData[]>(initialData);
+  const [totalItems, setTotalItems] = React.useState<number>(0);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
-  const [hasMore, setHasMore] = React.useState<boolean>(
-    initialData.length === 10,
-  );
+  const [hasMore, setHasMore] = React.useState<boolean>(true);
 
   // Pagination State
   const [{ pageIndex, pageSize }, setPagination] =
@@ -72,7 +68,18 @@ export function InvoiceDataTable<TData, TValue>({
       pageSize: 10,
     });
 
+  // Direct Page Jump Input State
+  const [pageInput, setPageInput] = React.useState<string>("1");
+
+  // ----------------------------------------------------
+  // Global Selected Objects Registry (Preserves across pages)
+  // ----------------------------------------------------
+  const [selectedObjects, setSelectedObjects] = React.useState<
+    Record<string, any>
+  >({});
+
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
+
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
     [],
   );
@@ -88,16 +95,18 @@ export function InvoiceDataTable<TData, TValue>({
   const [exportOpen, setExportOpen] = React.useState<boolean>(false);
 
   // ----------------------------------------------------
-  // Cached Fetch Engine
+  // Fetch Engine with Client Cache
   // ----------------------------------------------------
   const fetchPage = React.useCallback(
     async (page: number, size: number, forceRefresh = false) => {
       const cacheKey = `${page}_${size}`;
 
-      // ⚡ CACHE HIT: Instant load from React state
+      // ⚡ CACHE HIT: Load instantly from React memory
       if (!forceRefresh && cache[cacheKey]) {
         setData(cache[cacheKey].items);
+        setTotalItems(cache[cacheKey].total);
         setHasMore(cache[cacheKey].hasMore);
+        setPageInput(String(page + 1));
         return;
       }
 
@@ -107,22 +116,29 @@ export function InvoiceDataTable<TData, TValue>({
       const res = await getInvoices(startOffset, size);
 
       const items = (res.items as TData[]) || [];
+      const total = res.total || 0;
       const fetchHasMore = res.hasMore;
 
-      // Update active state
       setData(items);
+      setTotalItems(total);
       setHasMore(fetchHasMore);
+      setPageInput(String(page + 1));
 
-      // Save to client-side cache memory
+      // Store in memory
       setCache((prev) => ({
         ...prev,
-        [cacheKey]: { items, hasMore: fetchHasMore },
+        [cacheKey]: { items, total, hasMore: fetchHasMore },
       }));
 
       setIsLoading(false);
     },
     [cache],
   );
+
+  // Fetch initial page data metadata on mount if needed
+  React.useEffect(() => {
+    fetchPage(0, 10);
+  }, []);
 
   // Navigation handlers
   const handlePageChange = (newPageIndex: number) => {
@@ -135,10 +151,56 @@ export function InvoiceDataTable<TData, TValue>({
     fetchPage(0, newPageSize);
   };
 
-  // Hard Refresh (Clears cache & fetches freshly)
+  // Hard Refresh (used after batch creations)
   const handleFreshReload = () => {
     setCache({});
     fetchPage(pageIndex, pageSize, true);
+  };
+
+  // Synchronize multi-page selection state
+  const handleRowSelectionChange = (
+    updaterOrValue:
+      | RowSelectionState
+      | ((old: RowSelectionState) => RowSelectionState),
+  ) => {
+    const nextSelection =
+      typeof updaterOrValue === "function"
+        ? updaterOrValue(rowSelection)
+        : updaterOrValue;
+
+    setRowSelection(nextSelection);
+
+    setSelectedObjects((prev) => {
+      const updated = { ...prev };
+      data.forEach((item: any) => {
+        const id = String(item.id);
+        if (nextSelection[id]) {
+          updated[id] = item;
+        } else {
+          delete updated[id];
+        }
+      });
+      return updated;
+    });
+  };
+
+  // Page input keyboard submission
+  const totalPages = Math.ceil(totalItems / pageSize) || 1;
+
+  const handlePageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPageInput(e.target.value);
+  };
+
+  const handlePageInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      let targetPage = parseInt(pageInput, 10);
+      if (isNaN(targetPage) || targetPage < 1) targetPage = 1;
+      if (targetPage > totalPages) targetPage = totalPages;
+
+      const newIndex = targetPage - 1;
+      setPagination((prev) => ({ ...prev, pageIndex: newIndex }));
+      fetchPage(newIndex, pageSize);
+    }
   };
 
   const table = useReactTable({
@@ -146,9 +208,10 @@ export function InvoiceDataTable<TData, TValue>({
     columns,
     pageCount: -1,
     manualPagination: true,
+    getRowId: (row: any) => String(row.id), // ID-based selection key across pages
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    onRowSelectionChange: setRowSelection,
+    onRowSelectionChange: handleRowSelectionChange,
     onColumnFiltersChange: setColumnFilters,
     state: {
       rowSelection,
@@ -157,15 +220,14 @@ export function InvoiceDataTable<TData, TValue>({
     },
   });
 
-  const selectedRows = table.getFilteredSelectedRowModel().rows;
+  const batchSelectedInvoices = Object.values(selectedObjects);
+  const totalSelectedCount = Object.keys(rowSelection).length;
 
   const handleRecreate = async () => {
-    if (selectedRows.length === 0) return;
+    if (batchSelectedInvoices.length === 0) return;
 
     setIsGenerating(true);
-    const selectedInvoices = selectedRows.map((r) => r.original);
-
-    const res = await recreateAsTypeC(selectedInvoices);
+    const res = await recreateAsTypeC(batchSelectedInvoices);
     setIsGenerating(false);
 
     if (res.success && res.manifest) {
@@ -173,7 +235,7 @@ export function InvoiceDataTable<TData, TValue>({
       setGeneratedInvoices(res.createdInvoices || []);
       setSummaryOpen(true);
       setRowSelection({});
-      // Refresh current page after invoice creation
+      setSelectedObjects({});
       handleFreshReload();
     } else {
       alert(`Error: ${res.error}`);
@@ -193,19 +255,6 @@ export function InvoiceDataTable<TData, TValue>({
         </div>
 
         <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            onClick={handleFreshReload}
-            disabled={isLoading}
-            className="border-gray-300 text-gray-700 hover:bg-gray-50 font-medium px-3 h-10 gap-2"
-            title="Refresh current data from Alegra"
-          >
-            <RefreshCw
-              className={`h-4 w-4 text-gray-600 ${isLoading ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </Button>
-
           <Button
             variant="outline"
             onClick={() => setExportOpen(true)}
@@ -249,8 +298,8 @@ export function InvoiceDataTable<TData, TValue>({
             Filter
           </Button>
 
-          {/* Action Trigger Bar */}
-          {selectedRows.length > 0 && (
+          {/* Batch Action Bar */}
+          {totalSelectedCount > 0 && (
             <div className="ml-auto flex items-center gap-3">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500 font-medium">
@@ -267,8 +316,8 @@ export function InvoiceDataTable<TData, TValue>({
 
               <span className="text-xs text-gray-400">|</span>
 
-              <span className="text-xs text-gray-500">
-                {selectedRows.length} selected
+              <span className="text-xs text-gray-500 font-semibold text-[#2bbab4]">
+                {totalSelectedCount} selected
               </span>
 
               <Button
@@ -280,13 +329,13 @@ export function InvoiceDataTable<TData, TValue>({
                 {isGenerating && (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 )}
-                Recreate as Type C
+                Recreate ({totalSelectedCount}) as Type C
               </Button>
             </div>
           )}
         </div>
 
-        {/* Data Table */}
+        {/* Data Table Body */}
         <div className="relative">
           {isLoading && (
             <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex items-center justify-center z-10">
@@ -350,55 +399,70 @@ export function InvoiceDataTable<TData, TValue>({
           </Table>
         </div>
 
-        {/* Server API Pagination Bar */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-white">
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span>Rows per page</span>
-            <select
-              value={pageSize}
-              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-              className="border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 text-xs focus:outline-none focus:ring-1 focus:ring-[#2bbab4]"
-            >
-              {[10, 20, 30].map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-            </select>
-            <span className="ml-2 text-gray-400">|</span>
-            <span className="ml-2">
-              Showing{" "}
-              <strong className="font-medium text-gray-700">
-                {data.length}
-              </strong>{" "}
-              items (API offset: {pageIndex * pageSize})
-            </span>
+        {/* Custom API Pagination Footer (Matches exact target image layout) */}
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-white text-sm text-gray-600">
+          {/* Left: Items per page & Total Range Display (e.g., 1-10 337) */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span>Ítems per page:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                className="border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#2bbab4]"
+              >
+                {[10, 20, 30].map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="text-gray-500 font-medium ml-2">
+              {totalItems > 0
+                ? `${pageIndex * pageSize + 1}-${Math.min(
+                    (pageIndex + 1) * pageSize,
+                    totalItems,
+                  )} ${totalItems}`
+                : "0-0 0"}
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 mr-2">
-              Page {pageIndex + 1}
-            </span>
+          {/* Right: Interactive Page Input Jump & Navigation Arrows */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span>Page</span>
+              <input
+                type="text"
+                value={pageInput}
+                onChange={handlePageInputChange}
+                onKeyDown={handlePageInputKeyDown}
+                className="w-12 h-8 border border-gray-300 rounded-md text-center text-gray-800 focus:outline-none focus:ring-1 focus:ring-[#2bbab4]"
+              />
+              <span className="font-medium text-gray-700">{totalPages}</span>
+            </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handlePageChange(pageIndex - 1)}
-              disabled={pageIndex === 0 || isLoading}
-              className="h-8 w-8 p-0 border-gray-300 text-gray-600 disabled:opacity-40"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-1 ml-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handlePageChange(pageIndex - 1)}
+                disabled={pageIndex === 0 || isLoading}
+                className="h-8 w-8 p-0 text-gray-500 hover:bg-gray-100 disabled:opacity-30"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handlePageChange(pageIndex + 1)}
-              disabled={!hasMore || isLoading}
-              className="h-8 w-8 p-0 border-gray-300 text-gray-600 disabled:opacity-40"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handlePageChange(pageIndex + 1)}
+                disabled={pageIndex + 1 >= totalPages || isLoading}
+                className="h-8 w-8 p-0 text-gray-500 hover:bg-gray-100 disabled:opacity-30"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -415,7 +479,7 @@ export function InvoiceDataTable<TData, TValue>({
       <ExportDialog
         open={exportOpen}
         onClose={() => setExportOpen(false)}
-        selectedInvoices={selectedRows.map((r) => r.original)}
+        selectedInvoices={batchSelectedInvoices}
       />
     </div>
   );

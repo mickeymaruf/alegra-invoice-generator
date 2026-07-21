@@ -21,11 +21,11 @@ export async function getInvoices(
   const auth = await getAuthHeader();
   if (!auth) return { items: [], total: 0, hasMore: false };
 
-  // Alegra API strictly caps limit at 30
   const safeLimit = Math.min(limit, 30);
 
   try {
-    let url = `https://api.alegra.com/api/v1/invoices?start=${start}&limit=${safeLimit}`;
+    // 1. Add metadata=true to the URL
+    let url = `https://api.alegra.com/api/v1/invoices?metadata=true&start=${start}&limit=${safeLimit}`;
 
     if (
       startDate &&
@@ -46,22 +46,25 @@ export async function getInvoices(
 
     if (!res.ok) {
       console.error("Alegra API Error:", res.status, await res.text());
-      return { items: [], hasMore: false };
+      return { items: [], total: 0, hasMore: false };
     }
 
-    const data = await res.json();
-    const items = Array.isArray(data) ? data : [];
+    const responseData = await res.json();
+
+    // 2. Parse response with metadata format: { metadata: { total }, data: [...] }
+    const items = Array.isArray(responseData.data) ? responseData.data : [];
+    const total = responseData.metadata?.total || items.length;
 
     return {
       items,
-      hasMore: items.length === safeLimit,
+      total,
+      hasMore: start + items.length < total,
     };
   } catch (err) {
     console.error("Fetch Exception:", err);
-    return { items: [], hasMore: false };
+    return { items: [], total: 0, hasMore: false };
   }
 }
-
 export async function getNumberTemplates() {
   const auth = await getAuthHeader();
   if (!auth) return [];
