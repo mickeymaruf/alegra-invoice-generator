@@ -159,20 +159,29 @@ export async function recreateAsTypeC(
         inv.numberTemplate?.fullNumber || inv.number || String(inv.id);
 
       const payload = {
-        date: inv.date,
-        dueDate: inv.dueDate || inv.date,
-        client: { id: inv.client?.id },
-        items: inv.items?.map((item: any) => ({
+        ...inv,
+
+        numberTemplate: {
+          id: templateId,
+        },
+
+        client: {
+          id: inv.client.id,
+        },
+
+        warehouse: inv.warehouse
+          ? {
+              id: inv.warehouse.id,
+            }
+          : undefined,
+
+        items: inv.items.map((item: any) => ({
           id: item.id,
           price: item.price,
           quantity: item.quantity,
-          discount: item.discount || 0,
-          tax: item.tax ? item.tax.map((t: any) => ({ id: t.id })) : [],
+          discount: item.discount,
+          tax: item.tax,
         })),
-        numberTemplate: { id: templateId },
-        warehouse: inv.warehouse ? { id: inv.warehouse.id } : undefined,
-        observations: inv.observations || undefined,
-        anotation: inv.anotation || undefined,
       };
 
       const res = await fetch("https://api.alegra.com/api/v1/invoices", {

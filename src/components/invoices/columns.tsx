@@ -259,9 +259,9 @@ export const columns: ColumnDef<Invoice>[] = [
       );
     },
   },
-  {
-    id: "actions",
-    header: () => null,
-    cell: ({ row }) => <ActionMenuCell invoice={row.original} />,
-  },
+  // {
+  //   id: "actions",
+  //   header: () => null,
+  //   cell: ({ row }) => <ActionMenuCell invoice={row.original} />,
+  // },
 ];
