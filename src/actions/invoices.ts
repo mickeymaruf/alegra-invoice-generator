@@ -148,7 +148,6 @@ export async function getInvoicePdfUrl(id: string) {
     return null;
   }
 }
-
 export async function recreateAsTypeC(
   invoices: AlegraInvoice[],
   targetTemplateId?: string,
@@ -188,55 +187,65 @@ export async function recreateAsTypeC(
       };
     }
 
-    const manifest: GenerationManifestRow[] = [];
-    const createdInvoices: AlegraInvoice[] = [];
+    const manifestMap = new Map<string, GenerationManifestRow>();
+    const createdDrafts: { originalId: string; responseData: any }[] = [];
 
+    // ==========================================
+    // PHASE 1: CREATE ALL INVOICES AS DRAFTS
+    // ==========================================
     for (const inv of invoices) {
       const timestamp = new Date().toISOString();
-
       const origNum =
         inv.numberTemplate?.fullNumber || inv.number || String(inv.id);
 
+      // Clean payload (exclude read-only metadata)
       const payload = {
-        ...inv,
-
-        numberTemplate: {
-          id: templateId,
-        },
-
-        client: {
-          id: inv.client?.id,
-        },
-
-        warehouse: inv.warehouse
-          ? {
-              id: inv.warehouse.id,
-            }
-          : undefined,
-
-        items: inv.items?.map((item: InvoiceItem) => ({
+        date: inv.date,
+        dueDate: inv.dueDate || inv.date,
+        client: { id: inv.client?.id },
+        items: inv.items?.map((item: any) => ({
           id: item.id,
           price: item.price,
           quantity: item.quantity,
-          discount: item.discount,
-          tax: item.tax,
+          discount: item.discount || 0,
+          tax: item.tax ? item.tax.map((t: any) => ({ id: t.id })) : [],
         })),
+        numberTemplate: { id: templateId },
+        warehouse: inv.warehouse ? { id: inv.warehouse.id } : undefined,
+
+        observations: inv.observations || undefined,
+        anotation: inv.anotation || undefined,
+
+        term: inv.term,
+        saleCondition: inv.saleCondition,
+        saleConcept: inv.saleConcept,
+        startDateService: inv.startDateService,
+        endDateService: inv.endDateService,
       };
 
-      const res = await fetch("https://api.alegra.com/api/v1/invoices", {
-        method: "POST",
-        headers: {
-          Authorization: auth,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      // ❌ [DEBUG LOG] Start timer before POST /invoices ❌
+      console.time(
+        `❌ [DEBUG LOG] STAGE 1: POST /invoices (Original ID: ${inv.id}) ❌`,
+      );
 
-      const responseData = await res.json();
+      let res;
+      let responseData;
 
-      if (!res.ok) {
-        manifest.push({
+      try {
+        res = await fetch("https://api.alegra.com/api/v1/invoices", {
+          method: "POST",
+          headers: {
+            Authorization: auth,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        responseData = await res.json();
+      } catch (networkErr: any) {
+        // Handle fetch level/network timeout during draft creation
+        manifestMap.set(String(inv.id), {
           originalInvoiceId: String(inv.id),
           originalNumber: origNum,
           generatedInvoiceId: "",
@@ -244,59 +253,40 @@ export async function recreateAsTypeC(
           clientId: String(inv.client?.id || ""),
           clientName: inv.client?.name || "",
           status: "Failed",
-          error: responseData.message || "Failed to create invoice",
+          error: `[STAGE 1: DRAFT CREATION NETWORK ERROR] ${networkErr?.message || "Failed to connect to Alegra API"}`,
           generatedAt: timestamp,
         });
-
         continue;
+      } finally {
+        // ❌ [DEBUG LOG] End timer after POST /invoices ❌
+        console.timeEnd(
+          `❌ [DEBUG LOG] STAGE 1: POST /invoices (Original ID: ${inv.id}) ❌`,
+        );
       }
 
-      // Stamp / Approve invoice
-      const stampRes = await fetch(
-        "https://api.alegra.com/api/v1/invoices/stamp",
-        {
-          method: "POST",
-          headers: {
-            Authorization: auth,
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            ids: [String(responseData.id)],
-          }),
-        },
-      );
-
-      const stampData = await stampRes.json();
-
-      if (!stampRes.ok || stampData?.data?.[0]?.success !== true) {
-        manifest.push({
+      if (!res.ok) {
+        manifestMap.set(String(inv.id), {
           originalInvoiceId: String(inv.id),
           originalNumber: origNum,
-          generatedInvoiceId: String(responseData.id),
-          generatedNumber:
-            responseData.numberTemplate?.fullNumber ||
-            responseData.number ||
-            String(responseData.id),
+          generatedInvoiceId: "",
+          generatedNumber: "",
           clientId: String(inv.client?.id || ""),
           clientName: inv.client?.name || "",
           status: "Failed",
-          error:
-            stampData?.data?.[0]?.message ||
-            stampData?.message ||
-            "Invoice created but stamping failed",
+          error: `[STAGE 1: DRAFT CREATION FAILED] HTTP ${res.status}: ${responseData.message || "Failed to create draft invoice"}`,
           generatedAt: timestamp,
         });
-
         continue;
       }
 
-      createdInvoices.push({
-        ...responseData,
-        emissionStatus: stampData.data[0].emissionStatus,
+      // Store successfully created draft info
+      createdDrafts.push({
+        originalId: String(inv.id),
+        responseData,
       });
 
-      manifest.push({
+      // Pre-fill manifest as Failed (pending Stage 2)
+      manifestMap.set(String(inv.id), {
         originalInvoiceId: String(inv.id),
         originalNumber: origNum,
         generatedInvoiceId: String(responseData.id),
@@ -306,17 +296,98 @@ export async function recreateAsTypeC(
           String(responseData.id),
         clientId: String(inv.client?.id || ""),
         clientName: inv.client?.name || "",
-        status: "Success",
-        error: "",
+        status: "Failed",
+        error:
+          "[STAGE 2: STAMPING PENDING] Draft created successfully, awaiting AFIP stamping",
         generatedAt: timestamp,
       });
+    }
+
+    // ==========================================
+    // PHASE 2: BATCH STAMP INVOICES (CHUNKS OF 10)
+    // ==========================================
+    const BATCH_SIZE = 10;
+    const createdInvoices: AlegraInvoice[] = [];
+
+    for (let i = 0; i < createdDrafts.length; i += BATCH_SIZE) {
+      const chunk = createdDrafts.slice(i, i + BATCH_SIZE);
+      const chunkIds = chunk.map((item) => String(item.responseData.id));
+
+      // ❌ [DEBUG LOG] Start timer before POST /invoices/stamp ❌
+      console.time(
+        `❌ [DEBUG LOG] STAGE 2: POST /invoices/stamp (Chunk ${i / BATCH_SIZE + 1}, IDs: [${chunkIds.join(", ")}]) ❌`,
+      );
+
+      try {
+        const stampRes = await fetch(
+          "https://api.alegra.com/api/v1/invoices/stamp",
+          {
+            method: "POST",
+            headers: {
+              Authorization: auth,
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ ids: chunkIds }),
+          },
+        );
+
+        const stampData = await stampRes.json();
+        const stampResultsArray: any[] = stampData?.data || [];
+
+        // Map results back to manifest and createdInvoices
+        for (const item of chunk) {
+          const genId = String(item.responseData.id);
+          const itemStampResult = stampResultsArray.find(
+            (r: any) => String(r.id) === genId,
+          );
+
+          const existingManifest = manifestMap.get(item.originalId);
+
+          if (stampRes.ok && itemStampResult?.success === true) {
+            if (existingManifest) {
+              existingManifest.status = "Success";
+              existingManifest.error = "";
+            }
+
+            createdInvoices.push({
+              ...item.responseData,
+              emissionStatus:
+                itemStampResult.emissionStatus || "STAMPED_AND_ACCEPTED",
+            });
+          } else {
+            if (existingManifest) {
+              existingManifest.status = "Failed";
+              existingManifest.error = `[STAGE 2: AFIP STAMPING FAILED] HTTP ${stampRes.status}: ${
+                itemStampResult?.message ||
+                stampData?.message ||
+                "Service unavailable / AFIP authorization refused"
+              }`;
+            }
+          }
+        }
+      } catch (err: any) {
+        // Handle network/timeout error during stamping
+        for (const item of chunk) {
+          const existingManifest = manifestMap.get(item.originalId);
+          if (existingManifest) {
+            existingManifest.status = "Failed";
+            existingManifest.error = `[STAGE 2: STAMPING NETWORK ERROR] ${err?.message || "Service unavailable during AFIP stamping"}`;
+          }
+        }
+      } finally {
+        // ❌ [DEBUG LOG] End timer after POST /invoices/stamp ❌
+        console.timeEnd(
+          `❌ [DEBUG LOG] STAGE 2: POST /invoices/stamp (Chunk ${i / BATCH_SIZE + 1}, IDs: [${chunkIds.join(", ")}]) ❌`,
+        );
+      }
     }
 
     revalidatePath("/");
 
     return {
       success: true,
-      manifest,
+      manifest: Array.from(manifestMap.values()),
       createdInvoices,
     };
   } catch (err: unknown) {
