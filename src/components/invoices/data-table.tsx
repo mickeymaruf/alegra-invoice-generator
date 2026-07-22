@@ -71,7 +71,10 @@ export function InvoiceDataTable<TData, TValue>({
   // Direct Page Jump Input State
   const [pageInput, setPageInput] = React.useState<string>("1");
 
-  // Keep jump input string synced when pageIndex changes
+  // Server-side Search States
+  const [searchInput, setSearchInput] = React.useState<string>("");
+  const [activeQuery, setActiveQuery] = React.useState<string>("");
+
   React.useEffect(() => {
     setPageInput(String(pageIndex + 1));
   }, [pageIndex]);
@@ -100,11 +103,16 @@ export function InvoiceDataTable<TData, TValue>({
   const [exportOpen, setExportOpen] = React.useState<boolean>(false);
 
   // ----------------------------------------------------
-  // Fetch Engine with Stable Client Cache
+  // Fetch Engine (Supports Server-Side Search Query)
   // ----------------------------------------------------
   const fetchPage = React.useCallback(
-    async (page: number, size: number, forceRefresh = false) => {
-      const cacheKey = `${page}_${size}`;
+    async (
+      page: number,
+      size: number,
+      query: string = "",
+      forceRefresh = false,
+    ) => {
+      const cacheKey = `${page}_${size}_${query.trim()}`;
 
       // ⚡ CACHE HIT: Load instantly from React memory ref
       if (!forceRefresh && cacheRef.current[cacheKey]) {
@@ -115,10 +123,16 @@ export function InvoiceDataTable<TData, TValue>({
         return;
       }
 
-      // 🌐 CACHE MISS / REFRESH: Network Request
+      // 🌐 CACHE MISS: Server Request with Query
       setIsLoading(true);
       const startOffset = page * size;
-      const res = await getInvoices(startOffset, size);
+      const res = await getInvoices(
+        startOffset,
+        size,
+        undefined,
+        undefined,
+        query,
+      );
 
       const items = (res.items as TData[]) || [];
       const total = res.total || 0;
@@ -138,24 +152,42 @@ export function InvoiceDataTable<TData, TValue>({
 
   // Fetch initial page data metadata on mount
   React.useEffect(() => {
-    fetchPage(0, 10);
+    fetchPage(0, 10, "");
   }, [fetchPage]);
 
-  // Navigation handlers
+  // Execute Search trigger (called on Blur / Enter)
+  const handleExecuteSearch = () => {
+    const trimmed = searchInput.trim();
+    if (trimmed !== activeQuery) {
+      // Clear cache when search active query changes
+      cacheRef.current = {};
+      setActiveQuery(trimmed);
+      setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+      fetchPage(0, pageSize, trimmed, true);
+    }
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      // Blur to trigger the input's onBlur naturally
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
   const handlePageChange = (newPageIndex: number) => {
     setPagination((prev) => ({ ...prev, pageIndex: newPageIndex }));
-    fetchPage(newPageIndex, pageSize);
+    fetchPage(newPageIndex, pageSize, activeQuery);
   };
 
   const handlePageSizeChange = (newPageSize: number) => {
     setPagination({ pageIndex: 0, pageSize: newPageSize });
-    fetchPage(0, newPageSize);
+    fetchPage(0, newPageSize, activeQuery);
   };
 
   // Hard Refresh (used after batch creations)
   const handleFreshReload = () => {
     cacheRef.current = {};
-    fetchPage(pageIndex, pageSize, true);
+    fetchPage(pageIndex, pageSize, activeQuery, true);
   };
 
   // Synchronize multi-page selection state without wiping previous pages
@@ -200,7 +232,7 @@ export function InvoiceDataTable<TData, TValue>({
 
       const newIndex = targetPage - 1;
       setPagination((prev) => ({ ...prev, pageIndex: newIndex }));
-      fetchPage(newIndex, pageSize);
+      fetchPage(newIndex, pageSize, activeQuery);
     }
   };
 
@@ -280,13 +312,11 @@ export function InvoiceDataTable<TData, TValue>({
           <div className="relative max-w-xs w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
-              placeholder="Buscar client"
-              value={
-                (table.getColumn("client")?.getFilterValue() as string) ?? ""
-              }
-              onChange={(event) =>
-                table.getColumn("client")?.setFilterValue(event.target.value)
-              }
+              placeholder="Search by ID or Name..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onBlur={handleExecuteSearch}
+              onKeyDown={handleSearchKeyDown}
               className="pl-9 border-gray-300 rounded-full text-sm h-9 focus-visible:ring-[#2bbab4]"
             />
           </div>

@@ -64,6 +64,7 @@ export async function getInvoices(
   limit: number = 30,
   startDate?: string,
   endDate?: string,
+  query?: string,
 ) {
   const auth = await getAuthHeader();
   if (!auth) return { items: [], total: 0, hasMore: false };
@@ -71,15 +72,30 @@ export async function getInvoices(
   const safeLimit = Math.min(limit, 30);
 
   try {
-    let url = `https://api.alegra.com/api/v1/invoices?metadata=true&start=${start}&limit=${safeLimit}`;
+    const q = query?.trim() || "";
+    let url = `https://api.alegra.com/api/v1/invoices`;
 
-    if (
-      startDate &&
-      endDate &&
-      startDate.trim() !== "" &&
-      endDate.trim() !== ""
-    ) {
-      url += `&date_start=${startDate}&date_end=${endDate}`;
+    // 1. Handle ID Search
+    // If input is strictly numbers (e.g. "123" or "12,13"), use the `id` parameter.
+    // Note: Per docs, when `id` is present, other query params are ignored by Alegra.
+    if (q && /^\d+(,\d+)*$/.test(q)) {
+      url += `?id=${encodeURIComponent(q)}`;
+    } else {
+      // 2. Standard Search with Metadata & Filters
+      url += `?metadata=true&start=${start}&limit=${safeLimit}`;
+
+      if (q) {
+        // If it has letters/dashes (e.g. "INV-101"), search full number; otherwise client name
+        if (/\d/.test(q) && /[a-zA-Z\-]/.test(q)) {
+          url += `&numberTemplate_fullNumber=${encodeURIComponent(q)}`;
+        } else {
+          url += `&client_name=${encodeURIComponent(q)}`;
+        }
+      }
+
+      if (startDate && endDate) {
+        url += `&date_afterOrNow=${startDate}&date_beforeOrNow=${endDate}`;
+      }
     }
 
     const res = await fetch(url, {
@@ -97,8 +113,19 @@ export async function getInvoices(
 
     const responseData = await res.json();
 
-    const items = Array.isArray(responseData.data) ? responseData.data : [];
-    const total = responseData.metadata?.total || items.length;
+    // 3. Normalize Response (Handles both raw arrays and { metadata, data } objects)
+    let items: any[] = [];
+    let total = 0;
+
+    if (Array.isArray(responseData)) {
+      // Direct array response (triggered when `id` parameter is used)
+      items = responseData;
+      total = responseData.length;
+    } else if (responseData && Array.isArray(responseData.data)) {
+      // Standard response with metadata
+      items = responseData.data;
+      total = responseData.metadata?.total || items.length;
+    }
 
     return {
       items,

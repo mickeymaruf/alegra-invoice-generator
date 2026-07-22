@@ -104,6 +104,17 @@ export const columns: ColumnDef<Invoice>[] = [
     enableHiding: false,
   },
   {
+    accessorKey: "id",
+    header: () => (
+      <span className="text-xs font-semibold text-gray-600">ID</span>
+    ),
+    cell: ({ row }) => (
+      <span className="text-sm font-normal text-gray-600">
+        {row.original.id}
+      </span>
+    ),
+  },
+  {
     id: "type",
     header: () => (
       <span className="text-xs font-semibold text-gray-600">Type</span>
@@ -309,9 +320,4 @@ export const columns: ColumnDef<Invoice>[] = [
       );
     },
   },
-  // {
-  //   id: "actions",
-  //   header: () => null,
-  //   cell: ({ row }) => <ActionMenuCell invoice={row.original} />,
-  // },
 ];
