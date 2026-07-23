@@ -35,10 +35,13 @@ import {
 import {
   getInvoices,
   recreateAsTypeC,
+  stampInvoices,
   GenerationManifestRow,
+  StampManifestRow,
 } from "@/actions/invoices";
 import { ExportDialog } from "@/components/invoices/export-dialog";
 import { GenerationSummaryDialog } from "./generation-summary-dialog";
+import { StampSummaryDialog } from "./stamp-summary-dialog";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -93,6 +96,7 @@ export function InvoiceDataTable<TData, TValue>({
   );
   const [selectedType, setSelectedType] = React.useState<string>("INVOICE_C");
   const [isGenerating, setIsGenerating] = React.useState<boolean>(false);
+  const [isStamping, setIsStamping] = React.useState<boolean>(false);
 
   // Dialog States
   const [summaryOpen, setSummaryOpen] = React.useState<boolean>(false);
@@ -101,6 +105,12 @@ export function InvoiceDataTable<TData, TValue>({
   >([]);
   const [generatedInvoices, setGeneratedInvoices] = React.useState<any[]>([]);
   const [exportOpen, setExportOpen] = React.useState<boolean>(false);
+
+  const [stampSummaryOpen, setStampSummaryOpen] =
+    React.useState<boolean>(false);
+  const [stampManifestData, setStampManifestData] = React.useState<
+    StampManifestRow[]
+  >([]);
 
   // ----------------------------------------------------
   // Fetch Engine (Supports Server-Side Search Query)
@@ -256,6 +266,16 @@ export function InvoiceDataTable<TData, TValue>({
   const batchSelectedInvoices = Object.values(selectedObjects);
   const totalSelectedCount = Object.keys(rowSelection).length;
 
+  // Mirrors the "type" column logic: an invoice with no subDocumentType defaults to Type C
+  const getInvoiceType = (inv: any) => {
+    const subType = inv?.numberTemplate?.subDocumentType;
+    return subType ? subType.replace("INVOICE_", "") : "C";
+  };
+
+  const allSelectedAreTypeC =
+    totalSelectedCount > 0 &&
+    batchSelectedInvoices.every((inv: any) => getInvoiceType(inv) === "C");
+
   const handleRecreate = async () => {
     if (batchSelectedInvoices.length === 0) return;
 
@@ -267,6 +287,24 @@ export function InvoiceDataTable<TData, TValue>({
       setManifestData(res.manifest);
       setGeneratedInvoices(res.createdInvoices || []);
       setSummaryOpen(true);
+      setRowSelection({});
+      setSelectedObjects({});
+      handleFreshReload();
+    } else {
+      alert(`Error: ${res.error}`);
+    }
+  };
+
+  const handleStamp = async () => {
+    if (batchSelectedInvoices.length === 0 || !allSelectedAreTypeC) return;
+
+    setIsStamping(true);
+    const res = await stampInvoices(batchSelectedInvoices);
+    setIsStamping(false);
+
+    if (res.success) {
+      setStampManifestData(res.manifest);
+      setStampSummaryOpen(true);
       setRowSelection({});
       setSelectedObjects({});
       handleFreshReload();
@@ -361,6 +399,24 @@ export function InvoiceDataTable<TData, TValue>({
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 )}
                 Recreate ({totalSelectedCount}) as Type C
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isStamping || !allSelectedAreTypeC}
+                title={
+                  !allSelectedAreTypeC
+                    ? "Only Type C invoices can be stamped"
+                    : undefined
+                }
+                className="border-[#2bbab4] text-[#2bbab4] hover:bg-[#2bbab4]/10 gap-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400 disabled:hover:bg-transparent"
+                onClick={handleStamp}
+              >
+                {isStamping && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                )}
+                Stamp ({totalSelectedCount})
               </Button>
             </div>
           )}
@@ -511,6 +567,13 @@ export function InvoiceDataTable<TData, TValue>({
         open={exportOpen}
         onClose={() => setExportOpen(false)}
         selectedInvoices={batchSelectedInvoices}
+      />
+
+      {/* Stamp Summary Dialog */}
+      <StampSummaryDialog
+        open={stampSummaryOpen}
+        onClose={() => setStampSummaryOpen(false)}
+        manifest={stampManifestData}
       />
     </div>
   );

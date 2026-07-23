@@ -2,6 +2,11 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import {
+  normalizeStampResponse,
+  NormalizedStampResult,
+  RawStampResponse,
+} from "@/lib/stamp-normalizer";
 
 // --- Type Definitions ---
 export interface NumberTemplate {
@@ -49,6 +54,17 @@ export interface GenerationManifestRow {
   generatedAt: string;
 }
 
+export interface StampManifestRow {
+  invoiceId: string;
+  invoiceNumber: string;
+  clientId: string;
+  clientName: string;
+  status: "Success" | "Failed";
+  emissionStatus: string;
+  error: string;
+  stampedAt: string;
+}
+
 // --- Helper Functions ---
 async function getAuthHeader() {
   const cookieStore = await cookies();
@@ -57,6 +73,114 @@ async function getAuthHeader() {
 
   if (!email || !token) return null;
   return `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`;
+}
+
+// --- Stamp API integration ---
+// All stamping (both the standalone "Stamp" action and Phase 2 of
+// recreateAsTypeC) goes through this single helper so the rest of the app
+// never has to reason about Alegra's inconsistent `data`/`error` contract —
+// see src/lib/stamp-normalizer.ts for why that's necessary.
+const STAMP_ENDPOINT = "https://api.alegra.com/api/v1/invoices/stamp";
+const STAMP_BATCH_SIZE = 10;
+// Infrastructure failures (503s, unparsable bodies) are classified as RETRY
+// by the normalizer — retry those a couple of times with backoff before
+// giving up. Genuine validation failures (FAILED) are never retried.
+const STAMP_RETRY_DELAYS_MS = [500, 1500];
+
+async function fetchStampBatch(
+  auth: string,
+  ids: string[],
+): Promise<{ status: number; body: RawStampResponse | null }> {
+  try {
+    const res = await fetch(STAMP_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: auth,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ids }),
+    });
+
+    let body: RawStampResponse | null = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+
+    return { status: res.status, body };
+  } catch (err: any) {
+    // Network-level failure (DNS, timeout, connection reset). Represent it
+    // the same way as a 503 so the normalizer routes it to RETRY.
+    return {
+      status: 0,
+      body: {
+        message: err?.message || "Network error calling Alegra stamp API",
+      },
+    };
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Stamps a set of invoice ids, batching in chunks of STAMP_BATCH_SIZE and
+ * transparently retrying only the ids Alegra reports as infrastructure
+ * failures. Returns one normalized result per requested id — callers never
+ * touch the raw Alegra response.
+ */
+async function stampInvoiceIds(
+  auth: string,
+  ids: string[],
+): Promise<Map<string, NormalizedStampResult>> {
+  const resultsById = new Map<string, NormalizedStampResult>();
+
+  for (let i = 0; i < ids.length; i += STAMP_BATCH_SIZE) {
+    let pending = ids.slice(i, i + STAMP_BATCH_SIZE);
+    let attempt = 0;
+
+    while (pending.length > 0) {
+      const { status, body } = await fetchStampBatch(auth, pending);
+      const normalized = normalizeStampResponse(body, pending, status);
+
+      console.log(
+        `[STAMP] attempt ${attempt + 1} for [${pending.join(", ")}] -> HTTP ${status}`,
+        JSON.stringify(body),
+      );
+
+      const stillPending: string[] = [];
+
+      for (const result of normalized) {
+        if (result.status !== "RETRY") {
+          resultsById.set(result.id, result);
+          continue;
+        }
+
+        if (attempt < STAMP_RETRY_DELAYS_MS.length) {
+          stillPending.push(result.id);
+        } else {
+          // Retries exhausted — surface as a failure so it isn't silently lost.
+          resultsById.set(result.id, {
+            ...result,
+            status: "FAILED",
+            message: `${result.message} (retries exhausted)`,
+          });
+        }
+      }
+
+      pending = stillPending;
+
+      if (pending.length > 0) {
+        await delay(STAMP_RETRY_DELAYS_MS[attempt]);
+        attempt += 1;
+      }
+    }
+  }
+
+  return resultsById;
 }
 
 export async function getInvoices(
@@ -191,30 +315,30 @@ export async function recreateAsTypeC(
     };
 
   try {
-    // let templateId = targetTemplateId;
+    let templateId = targetTemplateId;
 
-    // if (!templateId) {
-    //   const templates = await getNumberTemplates();
+    if (!templateId) {
+      const templates = await getNumberTemplates();
 
-    //   const typeCTemplate = templates.find(
-    //     (t: NumberTemplate) =>
-    //       t.subDocumentType === "INVOICE_C" ||
-    //       t.prefix?.includes("C") ||
-    //       t.name?.toLowerCase().includes("factura c"),
-    //   );
+      const typeCTemplate = templates.find(
+        (t: NumberTemplate) =>
+          t.subDocumentType === "INVOICE_C" ||
+          t.prefix?.includes("C") ||
+          t.name?.toLowerCase().includes("factura c"),
+      );
 
-    //   templateId = typeCTemplate?.id || templates[0]?.id;
-    // }
+      templateId = typeCTemplate?.id || templates[0]?.id;
+    }
 
-    // if (!templateId) {
-    //   return {
-    //     success: false,
-    //     error: "No valid Type C template found in Alegra.",
-    //     manifest: [],
-    //     createdInvoices: [],
-    //   };
-    // }
-    const templateId = targetTemplateId || "3";
+    if (!templateId) {
+      return {
+        success: false,
+        error: "No valid Type C template found in Alegra.",
+        manifest: [],
+        createdInvoices: [],
+      };
+    }
+    // const templateId = targetTemplateId || "3";
 
     const manifestMap = new Map<string, GenerationManifestRow>();
 
@@ -240,18 +364,32 @@ export async function recreateAsTypeC(
           tax: item.tax ? item.tax.map((t: any) => ({ id: t.id })) : [],
         })),
         numberTemplate: { id: templateId },
+        // numberTemplate: {
+        //   id: "3",
+        //   prefix: "00002",
+        //   number: "4",
+        //   text: null,
+        //   documentType: "invoice",
+        //   fullNumber: "00002-00000004",
+        //   formattedNumber: "00000004",
+        //   subDocumentType: "INVOICE_C",
+        //   isElectronic: true,
+        // },
         warehouse: inv.warehouse ? { id: inv.warehouse.id } : undefined,
 
         ...(inv.observations ? { observations: inv.observations } : {}),
         ...(inv.anotation ? { anotation: inv.anotation } : {}),
         ...(inv.term ? { term: inv.term } : {}),
-        ...(inv.saleCondition ? { saleCondition: inv.saleCondition } : {}),
+        saleCondition: "CASH",
+        // ...(inv.saleCondition ? { saleCondition: inv.saleCondition } : {}),
         ...(inv.saleConcept ? { saleConcept: inv.saleConcept } : {}),
         ...(inv.startDateService
           ? { startDateService: inv.startDateService }
           : {}),
         ...(inv.endDateService ? { endDateService: inv.endDateService } : {}),
       };
+
+      console.log(payload);
 
       try {
         const res = await fetch("https://api.alegra.com/api/v1/invoices", {
@@ -265,6 +403,8 @@ export async function recreateAsTypeC(
         });
 
         const responseData = await res.json();
+
+        console.log("responseData", responseData);
 
         if (!res.ok) {
           manifestMap.set(String(inv.id), {
@@ -331,78 +471,40 @@ export async function recreateAsTypeC(
     );
 
     // ==========================================
-    // PHASE 2: BATCH STAMP INVOICES (CHUNKS OF 10)
+    // PHASE 2: STAMP INVOICES (shared normalizer + retry helper)
     // ==========================================
-    const BATCH_SIZE = 10;
     const createdInvoices: AlegraInvoice[] = [];
 
-    for (let i = 0; i < createdDrafts.length; i += BATCH_SIZE) {
-      const chunk = createdDrafts.slice(i, i + BATCH_SIZE);
-      const chunkIds = chunk.map((item) => String(item.responseData.id));
-
-      console.time(
-        `❌ [DEBUG LOG] STAGE 2: POST /invoices/stamp (Chunk ${i / BATCH_SIZE + 1}, IDs: [${chunkIds.join(", ")}]) ❌`,
+    if (createdDrafts.length > 0) {
+      const draftIds = createdDrafts.map((item) =>
+        String(item.responseData.id),
       );
+      const stampResults = await stampInvoiceIds(auth, draftIds);
 
-      try {
-        const stampRes = await fetch(
-          "https://api.alegra.com/api/v1/invoices/stamp",
-          {
-            method: "POST",
-            headers: {
-              Authorization: auth,
-              Accept: "application/json",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ ids: chunkIds }),
-          },
-        );
+      for (const item of createdDrafts) {
+        const id = String(item.responseData.id);
+        const result = stampResults.get(id);
+        const existingManifest = manifestMap.get(item.originalId);
+        const isSuccess =
+          result?.status === "ACCEPTED" || result?.status === "PROCESSING";
 
-        const stampData = await stampRes.json();
-        const stampResultsArray: any[] = stampData?.data || [];
-
-        for (const item of chunk) {
-          const genId = String(item.responseData.id);
-          const itemStampResult = stampResultsArray.find(
-            (r: any) => String(r.id) === genId,
-          );
-
-          const existingManifest = manifestMap.get(item.originalId);
-
-          if (stampRes.ok && itemStampResult?.success === true) {
-            if (existingManifest) {
-              existingManifest.status = "Success";
-              existingManifest.error = "";
-            }
-
-            createdInvoices.push({
-              ...item.responseData,
-              emissionStatus:
-                itemStampResult.emissionStatus || "STAMPED_AND_ACCEPTED",
-            });
-          } else {
-            if (existingManifest) {
-              existingManifest.status = "Failed";
-              existingManifest.error = `[STAGE 2: AFIP STAMPING FAILED] HTTP ${stampRes.status}: ${
-                itemStampResult?.message ||
-                stampData?.message ||
-                "Service unavailable / AFIP authorization refused"
-              }`;
-            }
-          }
-        }
-      } catch (err: any) {
-        for (const item of chunk) {
-          const existingManifest = manifestMap.get(item.originalId);
+        if (isSuccess) {
           if (existingManifest) {
-            existingManifest.status = "Failed";
-            existingManifest.error = `[STAGE 2: STAMPING NETWORK ERROR] ${err?.message || "Service unavailable during AFIP stamping"}`;
+            existingManifest.status = "Success";
+            existingManifest.error = "";
           }
+
+          createdInvoices.push({
+            ...item.responseData,
+            emissionStatus: result?.emissionStatus || "STAMPED_AND_ACCEPTED",
+          });
+        } else if (existingManifest) {
+          existingManifest.status = "Failed";
+          existingManifest.error = `[STAGE 2: AFIP STAMPING FAILED] ${
+            result?.message ||
+            "Service unavailable / AFIP authorization refused"
+          }`;
         }
-      } finally {
-        console.timeEnd(
-          `❌ [DEBUG LOG] STAGE 2: POST /invoices/stamp (Chunk ${i / BATCH_SIZE + 1}, IDs: [${chunkIds.join(", ")}]) ❌`,
-        );
       }
     }
 
@@ -420,6 +522,84 @@ export async function recreateAsTypeC(
         err instanceof Error ? err.message : "An unexpected error occurred",
       manifest: [],
       createdInvoices: [],
+    };
+  }
+}
+
+// Stamps already-existing invoices with AFIP without recreating them.
+export async function stampInvoices(invoices: AlegraInvoice[]) {
+  const auth = await getAuthHeader();
+
+  if (!auth)
+    return {
+      success: false,
+      error: "Not authenticated",
+      manifest: [],
+      stampedInvoices: [],
+    };
+
+  if (!invoices.length) {
+    return {
+      success: false,
+      error: "No invoices provided",
+      manifest: [],
+      stampedInvoices: [],
+    };
+  }
+
+  try {
+    const ids = invoices.map((inv) => String(inv.id));
+    const stampResults = await stampInvoiceIds(auth, ids);
+    const timestamp = new Date().toISOString();
+
+    const manifest: StampManifestRow[] = [];
+    const stampedInvoices: AlegraInvoice[] = [];
+
+    for (const inv of invoices) {
+      const id = String(inv.id);
+      const result = stampResults.get(id);
+      const isSuccess =
+        result?.status === "ACCEPTED" || result?.status === "PROCESSING";
+
+      manifest.push({
+        invoiceId: id,
+        invoiceNumber: inv.numberTemplate?.fullNumber || inv.number || id,
+        clientId: String(inv.client?.id || ""),
+        clientName: inv.client?.name || "",
+        status: isSuccess ? "Success" : "Failed",
+        emissionStatus: result?.emissionStatus || "",
+        error: isSuccess
+          ? ""
+          : `[STAMPING FAILED] ${result?.message || "Unknown stamping error"}`,
+        stampedAt: timestamp,
+      });
+
+      if (isSuccess) {
+        stampedInvoices.push({
+          ...inv,
+          emissionStatus:
+            result?.emissionStatus ||
+            (result?.status === "ACCEPTED"
+              ? "STAMPED_AND_ACCEPTED"
+              : "STAMPED_AND_WAITING_RESPONSE"),
+        });
+      }
+    }
+
+    revalidatePath("/");
+
+    return {
+      success: true,
+      manifest,
+      stampedInvoices,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error:
+        err instanceof Error ? err.message : "An unexpected error occurred",
+      manifest: [],
+      stampedInvoices: [],
     };
   }
 }
